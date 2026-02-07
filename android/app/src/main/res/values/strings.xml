@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">花哪了</string>
+    <string name="title_activity_main">花哪了</string>
+    <string name="package_name">com.huanale.app</string>
+    <string name="custom_url_scheme">com.huanale.app</string>
+</resources>
