@@ -53,17 +53,17 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start dev server |
-| `npm run build` | Production build |
-| `npm run preview` | Preview production build |
-| `npm run lint` | Run ESLint |
-| `npm run lint:fix` | Fix ESLint issues |
-| `npm run format` | Format with Prettier |
-| `npm run test` | Run tests |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run test:coverage` | Run tests with coverage |
+| Command                 | Description              |
+| ----------------------- | ------------------------ |
+| `npm run dev`           | Start dev server         |
+| `npm run build`         | Production build         |
+| `npm run preview`       | Preview production build |
+| `npm run lint`          | Run ESLint               |
+| `npm run lint:fix`      | Fix ESLint issues        |
+| `npm run format`        | Format with Prettier     |
+| `npm run test`          | Run tests                |
+| `npm run test:watch`    | Run tests in watch mode  |
+| `npm run test:coverage` | Run tests with coverage  |
 
 ## Mobile (Android / iOS)
 

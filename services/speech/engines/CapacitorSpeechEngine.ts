@@ -6,7 +6,14 @@
  * Supports partial results, permission management, and concurrent recording prevention.
  */
 
-import type { SpeechEngine, SpeechConfig, SpeechResultCallback, SpeechErrorCallback, SpeechEndCallback, SpeechError } from '../types';
+import type {
+  SpeechEngine,
+  SpeechConfig,
+  SpeechResultCallback,
+  SpeechErrorCallback,
+  SpeechEndCallback,
+  SpeechError,
+} from '../types';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 
 export class CapacitorSpeechEngine implements SpeechEngine {

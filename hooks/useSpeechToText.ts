@@ -50,6 +50,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<SpeechError | null>(null);
   const [duration, setDuration] = useState(0);
+  const [isAvailable, setIsAvailable] = useState(true);
+  const [unavailableError, setUnavailableError] = useState<SpeechError | null>(null);
 
   // Refs to persist across renders without causing re-renders
   const serviceRef = useRef<SpeechToTextService | null>(null);
@@ -65,8 +67,12 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     return serviceRef.current;
   }, []);
 
-  const isAvailable = getService().isAvailable();
-  const unavailableError = isAvailable ? null : getService().getUnavailableError();
+  useEffect(() => {
+    const service = getService();
+    const available = service.isAvailable();
+    setIsAvailable(available);
+    setUnavailableError(available ? null : service.getUnavailableError());
+  }, [getService]);
 
   // Timer management
   const startTimer = useCallback(() => {
@@ -113,14 +119,23 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   useEffect(() => {
     if (status === 'recording' && duration >= maxDuration) {
       console.debug(LOG_PREFIX, 'Max duration reached, auto-stopping');
-      doStop();
+      const timer = setTimeout(() => {
+        void doStop();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [status, duration, maxDuration, doStop]);
 
   const startRecording = useCallback(async () => {
     const service = getService();
 
-    console.debug(LOG_PREFIX, 'startRecording called, isAvailable:', service.isAvailable(), 'platform:', service.getPlatform());
+    console.debug(
+      LOG_PREFIX,
+      'startRecording called, isAvailable:',
+      service.isAvailable(),
+      'platform:',
+      service.getPlatform()
+    );
 
     if (!service.isAvailable()) {
       const unavailErr = service.getUnavailableError();

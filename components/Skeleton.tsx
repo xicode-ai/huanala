@@ -7,18 +7,13 @@ interface SkeletonProps {
   variant?: 'rect' | 'circle';
 }
 
-export const Skeleton: React.FC<SkeletonProps> = ({ 
-  className = "", 
-  width, 
-  height, 
-  variant = 'rect' 
-}) => {
+export const Skeleton: React.FC<SkeletonProps> = ({ className = '', width, height, variant = 'rect' }) => {
   const style = {
     width,
     height,
   };
-  
-  const baseClasses = "bg-slate-200 animate-pulse";
+
+  const baseClasses = 'bg-slate-200 animate-pulse';
   const variantClasses = variant === 'circle' ? 'rounded-full' : 'rounded-lg';
 
   return <div className={`${baseClasses} ${variantClasses} ${className}`} style={style}></div>;

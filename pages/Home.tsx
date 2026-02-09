@@ -10,7 +10,14 @@ import { useSpeechToText } from '../hooks/useSpeechToText';
 export const Home: React.FC = () => {
   const navigate = useNavigate();
   const { user, fetchUser, isLoading: userLoading } = useUserStore();
-  const { transactions, fetchTransactions, uploadBill, uploadVoice, isLoading: txLoading, isUploading } = useTransactionStore();
+  const {
+    transactions,
+    fetchTransactions,
+    uploadBill,
+    uploadVoice,
+    isLoading: txLoading,
+    isUploading,
+  } = useTransactionStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -33,6 +40,7 @@ export const Home: React.FC = () => {
 
   const isRecording = speechStatus === 'recording';
   const isTranscribing = speechStatus === 'transcribing';
+  const displayVoiceError = voiceError ?? speechError?.message ?? null;
 
   // Refs for hidden file inputs
   const albumInputRef = useRef<HTMLInputElement>(null);
@@ -51,15 +59,6 @@ export const Home: React.FC = () => {
       uploadVoice(transcript);
     }
   }, [speechStatus, transcript, uploadVoice]);
-
-  // Show speech errors (Task 6.4)
-  useEffect(() => {
-    if (speechError) {
-      setVoiceError(speechError.message);
-      const timer = setTimeout(() => setVoiceError(null), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [speechError]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -321,10 +320,10 @@ export const Home: React.FC = () => {
       >
         <div className="px-5 pb-6 pt-2">
           {/* Voice Error Toast */}
-          {voiceError && (
+          {displayVoiceError && (
             <div className="mb-2 px-4 py-2.5 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-2">
               <Icon name="error_outline" className="text-[18px] shrink-0" />
-              <span className="line-clamp-2">{voiceError}</span>
+              <span className="line-clamp-2">{displayVoiceError}</span>
             </div>
           )}
 
@@ -407,13 +406,19 @@ export const Home: React.FC = () => {
           {/* Expanded Menu */}
           {isMenuOpen && !isRecording && (
             <div className="flex justify-between px-8 pt-8 pb-4 animate-in slide-in-from-bottom-5 fade-in duration-300 relative z-10">
-              <button onClick={() => albumInputRef.current?.click()} className="flex flex-col items-center gap-2.5 group w-20">
+              <button
+                onClick={() => albumInputRef.current?.click()}
+                className="flex flex-col items-center gap-2.5 group w-20"
+              >
                 <div className="size-14 rounded-2xl bg-white flex items-center justify-center shadow-soft border border-slate-50 group-active:scale-95 transition-transform">
                   <Icon name="image" className="text-[28px] text-slate-600" />
                 </div>
                 <span className="text-sm font-medium text-slate-500">Album</span>
               </button>
-              <button onClick={() => cameraInputRef.current?.click()} className="flex flex-col items-center gap-2.5 group w-20">
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex flex-col items-center gap-2.5 group w-20"
+              >
                 <div className="size-14 rounded-2xl bg-white flex items-center justify-center shadow-soft border border-slate-50 group-active:scale-95 transition-transform">
                   <Icon name="photo_camera" className="text-[28px] text-slate-600" />
                 </div>

@@ -7,7 +7,14 @@
  * - Unsupported browsers: returns not-available error
  */
 
-import type { SpeechEngine, SpeechConfig, SpeechResultCallback, SpeechErrorCallback, SpeechEndCallback, SpeechError } from './types';
+import type {
+  SpeechEngine,
+  SpeechConfig,
+  SpeechResultCallback,
+  SpeechErrorCallback,
+  SpeechEndCallback,
+  SpeechError,
+} from './types';
 import { WebSpeechEngine } from './engines/WebSpeechEngine';
 import { CapacitorSpeechEngine } from './engines/CapacitorSpeechEngine';
 
@@ -34,7 +41,12 @@ export class SpeechToTextService {
   constructor() {
     this.platform = detectPlatform();
     this.engine = this.createEngine();
-    console.debug('[SpeechToTextService] platform:', this.platform, 'engine:', this.engine ? this.engine.constructor.name : 'none');
+    console.debug(
+      '[SpeechToTextService] platform:',
+      this.platform,
+      'engine:',
+      this.engine ? this.engine.constructor.name : 'none'
+    );
   }
 
   /** Get or create the singleton service instance */

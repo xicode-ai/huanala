@@ -26,34 +26,34 @@ export const EChartsPie: React.FC<EChartsPieProps> = ({ data }) => {
           avoidLabelOverlap: false,
           label: {
             show: false,
-            position: 'center'
+            position: 'center',
           },
           emphasis: {
             scale: false,
             label: {
               show: false,
-            }
+            },
           },
           labelLine: {
-            show: false
+            show: false,
           },
-          data: data.map(item => ({
+          data: data.map((item) => ({
             value: item.value,
             name: item.name,
             itemStyle: {
-                color: item.color,
-                borderRadius: 5,
-                borderColor: '#fff',
-                borderWidth: 2
-            }
-          }))
-        }
+              color: item.color,
+              borderRadius: 5,
+              borderColor: '#fff',
+              borderWidth: 2,
+            },
+          })),
+        },
       ],
       tooltip: {
         trigger: 'item',
         formatter: '{b}: {c}%',
-        confine: true
-      }
+        confine: true,
+      },
     };
 
     chartInstance.current.setOption(option);

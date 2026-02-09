@@ -6,10 +6,6 @@ interface IconProps {
   fill?: boolean;
 }
 
-export const Icon: React.FC<IconProps> = ({ name, className = "", fill = false }) => {
-  return (
-    <span className={`material-symbols-outlined ${fill ? 'fill' : ''} ${className}`}>
-      {name}
-    </span>
-  );
+export const Icon: React.FC<IconProps> = ({ name, className = '', fill = false }) => {
+  return <span className={`material-symbols-outlined ${fill ? 'fill' : ''} ${className}`}>{name}</span>;
 };

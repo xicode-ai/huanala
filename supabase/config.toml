@@ -1,0 +1,8 @@
+[functions.ai-chat]
+verify_jwt = true
+
+[functions.process-bill]
+verify_jwt = true
+
+[functions.process-voice]
+verify_jwt = true

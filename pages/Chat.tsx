@@ -33,6 +33,7 @@ export const Chat: React.FC = () => {
   } = useSpeechToText();
 
   const isVoiceRecording = speechStatus === 'recording';
+  const displayVoiceError = voiceError ?? speechError?.message ?? null;
 
   useEffect(() => {
     fetchUser();
@@ -45,15 +46,6 @@ export const Chat: React.FC = () => {
       setInputValue(transcript);
     }
   }, [speechStatus, transcript, setInputValue]);
-
-  // Show speech errors (Task 7.4)
-  useEffect(() => {
-    if (speechError) {
-      setVoiceError(speechError.message);
-      const timer = setTimeout(() => setVoiceError(null), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [speechError]);
 
   const handleSend = async (text: string = inputValue) => {
     await sendMessage(text);
@@ -130,7 +122,10 @@ export const Chat: React.FC = () => {
                     <span className="text-[14px] text-slate-600 font-medium group-hover:text-primary transition-colors">
                       {q}
                     </span>
-                    <Icon name="chevron_right" className="text-slate-300 text-[18px] group-hover:text-primary transition-colors" />
+                    <Icon
+                      name="chevron_right"
+                      className="text-slate-300 text-[18px] group-hover:text-primary transition-colors"
+                    />
                   </button>
                 ))}
               </div>
@@ -314,10 +309,10 @@ export const Chat: React.FC = () => {
       {/* Chat Input */}
       <div className="absolute bottom-0 left-0 w-full z-30 px-6 pb-6 bg-gradient-to-t from-background-light via-background-light/95 to-transparent pt-20 pointer-events-none">
         {/* Voice Error Toast */}
-        {voiceError && (
+        {displayVoiceError && (
           <div className="mb-2 px-4 py-2.5 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-2 pointer-events-auto">
             <Icon name="error_outline" className="text-[18px] shrink-0" />
-            <span className="line-clamp-2">{voiceError}</span>
+            <span className="line-clamp-2">{displayVoiceError}</span>
           </div>
         )}
 
