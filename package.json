@@ -13,7 +13,9 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,css,md}\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "supabase:schema:export": "bash supabase/scripts/export-schema.sh",
+    "supabase:schema:pull": "bash supabase/scripts/pull-schema-migration.sh"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",

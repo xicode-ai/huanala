@@ -36,11 +36,11 @@ npm install
 
 ### 2. Environment
 
-Copy environment template and set your API key:
+Copy environment template and set your Supabase credentials:
 
 ```bash
 cp .env.example .env.local
-# Edit .env.local and set GEMINI_API_KEY=your_key
+# Edit .env.local and set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY
 ```
 
 ### 3. Run locally

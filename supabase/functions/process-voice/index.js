@@ -1,6 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
-import { ensureGeminiConfigured, generateText, parseJsonFromText } from '../_shared/gemini.js';
+import { ensureConfigured, generateText, parseJsonFromText } from '../_shared/qwen.js';
 
 const VOICE_PROMPT = [
   'Extract one transaction from the transcript and return JSON only.',
@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     return jsonResponse(401, { error: 'Unauthorized' });
   }
 
-  if (!ensureGeminiConfigured()) {
+  if (!ensureConfigured()) {
     return jsonResponse(500, { error: 'AI service not configured' });
   }
 
@@ -40,7 +40,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const modelText = await generateText([{ text: VOICE_PROMPT }, { text: `Transcript: ${transcript}` }]);
+    const modelText = await generateText([
+      { role: 'system', content: VOICE_PROMPT },
+      { role: 'user', content: `Transcript: ${transcript}` },
+    ]);
     const parsed = parseJsonFromText(modelText);
 
     const amount = Number(parsed?.amount);

@@ -1,6 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
-import { ensureGeminiConfigured, generateText } from '../_shared/gemini.js';
+import { ensureConfigured, generateText } from '../_shared/qwen.js';
 
 const SYSTEM_PROMPT =
   'You are Hua Na Le, a practical personal finance assistant. Keep replies concise, accurate, and actionable.';
@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
     return jsonResponse(401, { error: 'Unauthorized' });
   }
 
-  if (!ensureGeminiConfigured()) {
+  if (!ensureConfigured()) {
     return jsonResponse(500, { error: 'AI service not configured' });
   }
 
@@ -36,7 +36,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const reply = await generateText([{ text: SYSTEM_PROMPT }, { text: `User: ${message}` }]);
+    const reply = await generateText([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: message },
+    ]);
 
     const { error: insertError } = await auth.client.from('messages').insert([
       {
@@ -60,7 +63,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse(200, { reply });
   } catch (err) {
-    console.error('Gemini call failed', err);
+    console.error('AI chat call failed', err);
     return jsonResponse(502, { error: 'AI service unavailable' });
   }
 });

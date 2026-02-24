@@ -1,11 +1,13 @@
 import { create } from 'zustand';
-import { User } from '../types';
-import { supabase } from '../services/supabase';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { User } from '../types';
+import { authService } from '../services/authService';
+import { userService } from '../services/userService';
 
 interface UserState {
   user: User | null;
   isLoading: boolean;
+  isInitializing: boolean;
   isAuthenticated: boolean;
   authError: string | null;
   otpSent: boolean;
@@ -20,64 +22,48 @@ interface UserState {
   clearError: () => void;
 }
 
-/**
- * Map a Supabase auth user + profiles row into our app's User type.
- */
-async function mapSupabaseUser(session: Session | null): Promise<User | null> {
-  if (!session?.user) return null;
-
-  const authUser = session.user;
-
-  // Fetch profile from profiles table
-  const { data: profile } = await supabase.from('profiles').select('*').eq('id', authUser.id).single();
-
-  return {
-    id: authUser.id,
-    name: profile?.name || authUser.email?.split('@')[0] || 'User',
-    handle: profile?.handle || `@${authUser.email?.split('@')[0] || 'user'}`,
-    avatar: profile?.avatar_url || 'https://picsum.photos/200',
-    isPremium: profile?.is_premium || false,
-    phone: profile?.phone || '',
-    // Financial fields are computed client-side from transactions
-    balance: 0,
-    monthlyExpenses: 0,
-    dailyAvailable: 0,
-    budgetUsedPercent: 0,
-    leftAmount: 0,
-  };
-}
-
 export const useUserStore = create<UserState>((set, get) => ({
   user: null,
-  isLoading: true, // start true until session check completes
+  isLoading: false,
+  isInitializing: true, // start true until session check completes
   isAuthenticated: false,
   authError: null,
   otpSent: false,
   otpEmail: null,
 
   initAuth: async () => {
-    set({ isLoading: true });
+    set({ isInitializing: true });
+
+    // 标记是否已从 getSession 获取用户，避免 onAuthStateChange 重复处理
+    let sessionHandled = false;
 
     // Check existing session
     const {
       data: { session },
-    } = await supabase.auth.getSession();
+    } = await authService.getSession();
     if (session) {
-      const user = await mapSupabaseUser(session);
-      set({ user, isAuthenticated: true, isLoading: false });
+      const user = await userService.mapSupabaseSession(session);
+      set({ user, isAuthenticated: true, isInitializing: false });
+      sessionHandled = true;
     } else {
-      set({ isLoading: false });
+      set({ isInitializing: false });
     }
 
     // Listen for auth state changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+    } = authService.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // 跳过初始化阶段已处理的 session（避免重复查询 profiles）
+      if (sessionHandled && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN')) {
+        sessionHandled = false; // 重置标记，后续事件正常处理
+        return;
+      }
+
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-        const user = await mapSupabaseUser(session);
-        set({ user, isAuthenticated: true, isLoading: false, otpSent: false });
+        const user = await userService.mapSupabaseSession(session);
+        set({ user, isAuthenticated: true, isInitializing: false, otpSent: false });
       } else if (event === 'SIGNED_OUT') {
-        set({ user: null, isAuthenticated: false, isLoading: false, otpSent: false, otpEmail: null });
+        set({ user: null, isAuthenticated: false, isInitializing: false, otpSent: false, otpEmail: null });
       }
     });
 
@@ -90,10 +76,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   sendOtp: async (email: string) => {
     set({ isLoading: true, authError: null });
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true },
-      });
+      const { error } = await authService.sendOtp(email);
       if (error) {
         set({ authError: error.message, isLoading: false });
       } else {
@@ -110,15 +93,11 @@ export const useUserStore = create<UserState>((set, get) => ({
   verifyOtp: async (email: string, token: string) => {
     set({ isLoading: true, authError: null });
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token,
-        type: 'email',
-      });
+      const { data, error } = await authService.verifyOtp(email, token);
       if (error) {
         set({ authError: error.message, isLoading: false });
       } else {
-        const user = await mapSupabaseUser(data.session ?? null);
+        const user = await userService.mapSupabaseSession(data.session ?? null);
         set({
           user,
           isAuthenticated: Boolean(user),
@@ -140,7 +119,7 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   logout: async () => {
     set({ isLoading: true });
-    await supabase.auth.signOut();
+    await authService.signOut();
     // onAuthStateChange will clear state
   },
 
@@ -150,8 +129,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
-      const user = await mapSupabaseUser(session);
+      } = await authService.getSession();
+      const user = await userService.mapSupabaseSession(session);
       if (user) {
         set({ user, isAuthenticated: true });
       }

@@ -1,20 +1,12 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
-import { ensureGeminiConfigured, generateVisionJson } from '../_shared/gemini.js';
+import { ensureConfigured, generateVisionJson } from '../_shared/qwen.js';
 
 const BILL_PROMPT = [
   'Extract one transaction from this receipt image and return JSON only.',
   'Schema: {"title": string, "amount": number, "currency": string, "category": string, "merchant": string}.',
   'No markdown, no explanation, JSON only.',
 ].join(' ');
-
-function guessMimeType(path) {
-  const lower = path.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  return 'image/jpeg';
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -30,7 +22,7 @@ Deno.serve(async (req) => {
     return jsonResponse(401, { error: 'Unauthorized' });
   }
 
-  if (!ensureGeminiConfigured()) {
+  if (!ensureConfigured()) {
     return jsonResponse(500, { error: 'AI service not configured' });
   }
 
@@ -48,27 +40,22 @@ Deno.serve(async (req) => {
   }
 
   try {
-    let bytes;
-    let mimeType = 'image/jpeg';
+    let url;
 
     if (storagePath) {
-      const { data, error } = await auth.client.storage.from('bills').download(storagePath);
-      if (error || !data) {
-        console.error('Failed to download image from storage', error);
+      const { data: signedData, error: signedError } = await auth.client.storage
+        .from('bills')
+        .createSignedUrl(storagePath, 300);
+      if (signedError || !signedData?.signedUrl) {
+        console.error('Failed to create signed URL for image', signedError);
         return jsonResponse(422, { error: 'Could not extract transaction data from image' });
       }
-      bytes = await data.arrayBuffer();
-      mimeType = guessMimeType(storagePath);
+      url = signedData.signedUrl;
     } else {
-      const imageResp = await fetch(imageUrl);
-      if (!imageResp.ok) {
-        return jsonResponse(422, { error: 'Could not extract transaction data from image' });
-      }
-      bytes = await imageResp.arrayBuffer();
-      mimeType = imageResp.headers.get('content-type') || guessMimeType(imageUrl);
+      url = imageUrl;
     }
 
-    const parsed = await generateVisionJson(BILL_PROMPT, bytes, mimeType);
+    const parsed = await generateVisionJson(BILL_PROMPT, url);
     const amount = Number(parsed?.amount);
 
     if (!Number.isFinite(amount) || amount <= 0) {

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Message } from '../types';
-import { supabase } from '../services/supabase';
+import { authService } from '../services/authService';
+import { chatService } from '../services/chatService';
 
 interface ChatState {
   messages: Message[];
@@ -10,17 +11,6 @@ interface ChatState {
   setInputValue: (value: string) => void;
   fetchChatHistory: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
-}
-
-function mapMessageRow(row: Record<string, unknown>): Message {
-  const createdAt = row.created_at ? new Date(String(row.created_at)) : new Date();
-  return {
-    id: String(row.id),
-    sender: row.sender === 'user' ? 'user' : 'ai',
-    text: String(row.text || ''),
-    timestamp: createdAt.toLocaleString(),
-    type: row.type === 'chart' || row.type === 'transaction_list' ? row.type : 'text',
-  };
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -37,24 +27,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } = await authService.getSession();
 
       if (!session) {
         set({ messages: [] });
         return;
       }
 
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        throw error;
-      }
-
-      const messages = (data || []).map((row) => mapMessageRow(row as unknown as Record<string, unknown>));
+      const messages = await chatService.fetchHistory(session.user.id);
       set({ messages });
     } catch (error) {
       console.error('Failed to fetch chat history:', error);
@@ -68,7 +48,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const {
       data: { session },
-    } = await supabase.auth.getSession();
+    } = await authService.getSession();
     if (!session) {
       const unauthMsg: Message = {
         id: `unauth-${Date.now()}`,
@@ -95,22 +75,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const { data, error } = await supabase.functions.invoke('ai-chat', {
-        body: { message: text },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      const aiResponse: Message = {
-        id: `ai-${Date.now()}`,
-        sender: 'ai',
-        text: String(data?.reply || 'No response from AI.'),
-        timestamp: 'Just now',
-        type: 'text',
-      };
-
+      const aiResponse = await chatService.sendMessage(text);
       set((state) => ({ messages: [...state.messages, aiResponse] }));
     } catch (error) {
       console.error('Failed to send message:', error);

@@ -50,7 +50,8 @@ export const Home: React.FC = () => {
   useEffect(() => {
     fetchUser();
     fetchTransactions();
-  }, [fetchUser, fetchTransactions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 仅在组件挂载时执行一次，Zustand store 方法是稳定引用
 
   // Submit transcript when recording completes (Task 6.3)
   useEffect(() => {
