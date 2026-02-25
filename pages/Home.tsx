@@ -17,11 +17,14 @@ export const Home: React.FC = () => {
     uploadVoice,
     isLoading: txLoading,
     isUploading,
+    lastBatchCount,
+    clearLastBatchCount,
   } = useTransactionStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [batchToast, setBatchToast] = useState<string | null>(null);
 
   const isLoading = userLoading || txLoading;
 
@@ -60,6 +63,15 @@ export const Home: React.FC = () => {
       uploadVoice(transcript);
     }
   }, [speechStatus, transcript, uploadVoice]);
+
+  useEffect(() => {
+    if (lastBatchCount > 0 && !isUploading) {
+      setBatchToast(`已创建 ${lastBatchCount} 条记录`);
+      clearLastBatchCount();
+      const timer = setTimeout(() => setBatchToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastBatchCount, isUploading, clearLastBatchCount]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -321,6 +333,12 @@ export const Home: React.FC = () => {
       >
         <div className="px-5 pb-6 pt-2">
           {/* Voice Error Toast */}
+          {batchToast && (
+            <div className="mb-2 px-4 py-2.5 bg-green-50 border border-green-100 rounded-2xl text-green-700 text-sm font-medium animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-2">
+              <Icon name="check_circle" className="text-[18px] shrink-0" />
+              <span>{batchToast}</span>
+            </div>
+          )}
           {displayVoiceError && (
             <div className="mb-2 px-4 py-2.5 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-2">
               <Icon name="error_outline" className="text-[18px] shrink-0" />

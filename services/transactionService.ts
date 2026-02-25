@@ -73,45 +73,38 @@ export const transactionService = {
   /**
    * 上传账单图片并处理
    */
-  uploadBill: async (userId: string, file: File): Promise<Transaction> => {
-    // 1. Upload image to storage
+  uploadBill: async (userId: string, file: File): Promise<Transaction[]> => {
     const ext = file.name.split('.').pop() || 'jpg';
     const path = `${userId}/${Date.now()}.${ext}`;
     const { error: uploadError } = await supabase.storage.from('bills').upload(path, file);
-
     if (uploadError) throw uploadError;
-
-    // 2. Create signed URL for Edge Function
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from('bills')
       .createSignedUrl(path, 60 * 5);
-
     if (signedUrlError) throw signedUrlError;
-
-    // 3. Call process-bill Edge Function
     const { data, error } = await supabase.functions.invoke('process-bill', {
       body: { image_url: signedUrlData?.signedUrl, storage_path: path },
     });
 
-    if (error || !data?.transaction) {
-      throw error || new Error('No transaction returned from process-bill');
+    if (error || !Array.isArray(data?.transactions) || data.transactions.length === 0) {
+      throw error || new Error('No transactions returned from process-bill');
     }
 
-    return mapRow(data.transaction);
+    return data.transactions.map(mapRow);
   },
 
   /**
    * 处理语音记账
    */
-  processVoice: async (transcript: string): Promise<Transaction> => {
+  processVoice: async (transcript: string): Promise<Transaction[]> => {
     const { data, error } = await supabase.functions.invoke('process-voice', {
       body: { transcript },
     });
 
-    if (error || !data?.transaction) {
-      throw error || new Error('No transaction returned from process-voice');
+    if (error || !Array.isArray(data?.transactions) || data.transactions.length === 0) {
+      throw error || new Error('No transactions returned from process-voice');
     }
 
-    return mapRow(data.transaction);
+    return data.transactions.map(mapRow);
   },
 };

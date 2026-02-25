@@ -7,14 +7,14 @@ interface TransactionState {
   transactions: Transaction[];
   isLoading: boolean;
   isUploading: boolean;
-
+  lastBatchCount: number;
   fetchTransactions: () => Promise<void>;
   addTransaction: (tx: Transaction) => void;
+  addTransactions: (txs: Transaction[]) => void;
   insertTransaction: (tx: Omit<Transaction, 'id'>) => Promise<Transaction | null>;
   uploadBill: (file: File) => Promise<void>;
   uploadVoice: (transcriptText: string) => Promise<void>;
-
-  // Computed financial summary
+  clearLastBatchCount: () => void;
   monthlyExpenses: number;
   totalIncome: number;
 }
@@ -23,6 +23,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactions: [],
   isLoading: false,
   isUploading: false,
+  lastBatchCount: 0,
   monthlyExpenses: 0,
   totalIncome: 0,
 
@@ -65,6 +66,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }));
   },
 
+  addTransactions: (txs: Transaction[]) => {
+    set((state) => ({
+      transactions: [...txs, ...state.transactions],
+      monthlyExpenses:
+        state.monthlyExpenses + txs.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+      totalIncome: state.totalIncome + txs.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
+    }));
+  },
+
   insertTransaction: async (tx: Omit<Transaction, 'id'>) => {
     try {
       const {
@@ -90,7 +100,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       if (!session) throw new Error('Not authenticated');
 
       const mapped = await transactionService.uploadBill(session.user.id, file);
-      get().addTransaction(mapped);
+      get().addTransactions(mapped);
+      set({ lastBatchCount: mapped.length });
     } catch (error) {
       console.error('Upload bill failed:', error);
     } finally {
@@ -107,11 +118,16 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       if (!session) throw new Error('Not authenticated');
 
       const mapped = await transactionService.processVoice(transcriptText);
-      get().addTransaction(mapped);
+      get().addTransactions(mapped);
+      set({ lastBatchCount: mapped.length });
     } catch (error) {
       console.error('Voice processing failed:', error);
     } finally {
       set({ isUploading: false });
     }
+  },
+
+  clearLastBatchCount: () => {
+    set({ lastBatchCount: 0 });
   },
 }));

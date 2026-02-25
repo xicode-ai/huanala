@@ -22,9 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.opencode/
-.cursor/
-.agent/
-.playwright-mcp/
-.serena/
-.cursorrules
+# .opencode/
+# .cursor/
+# .agent/
+# .playwright-mcp/
+# .serena/
+# .cursorrules
