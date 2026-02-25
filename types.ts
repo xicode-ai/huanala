@@ -25,11 +25,23 @@ export interface Transaction {
   iconColor: string; // Tailwind class
   type: 'expense' | 'income';
   note?: string;
+  sessionId?: string;
   details?: {
     merchant?: string;
     description?: string;
     reward?: string;
   };
+}
+
+export interface InputSession {
+  id: string;
+  source: 'voice' | 'bill_scan' | 'manual';
+  recordCount: number;
+  totalAmount: number;
+  currency: string;
+  date: string;
+  time: string;
+  createdAt: string;
 }
 
 export interface ChartData {

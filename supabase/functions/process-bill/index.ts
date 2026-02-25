@@ -1,3 +1,4 @@
+import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
 import { ensureConfigured, generateVisionJson } from '../_shared/qwen.js';
@@ -10,7 +11,23 @@ const BILL_PROMPT = [
   'No markdown, no explanation, JSON only.',
 ].join(' ');
 
-function normalizeTransaction(item: any) {
+interface RawItem {
+  title?: string;
+  amount?: number | string;
+  currency?: string;
+  category?: string;
+  merchant?: string;
+}
+
+interface NormalizedItem {
+  title: string;
+  amount: number;
+  currency: string;
+  category: string;
+  merchant: string | null;
+}
+
+function normalizeTransaction(item: RawItem): NormalizedItem {
   const amount = Number(item?.amount);
   return {
     title: typeof item?.title === 'string' && item.title.trim() ? item.title.trim() : 'Bill Purchase',
@@ -22,17 +39,18 @@ function normalizeTransaction(item: any) {
 }
 
 /**
- * Download an image from a URL and return a base64 data URL.
- * DashScope (China) cannot download external URLs, so we must
- * fetch the image bytes on the edge function and inline them.
+ * Download a file from Supabase Storage and return a base64 data URL.
+ * DashScope (China) cannot download external URLs reliably or quickly,
+ * so we must fetch the image bytes on the edge function and inline them.
  */
-async function toBase64DataUrl(imageUrl: string): Promise<string> {
-  const res = await fetch(imageUrl);
-  if (!res.ok) {
-    throw new Error(`Failed to download image: ${res.status}`);
+async function getBase64DataUrlFromStorage(supabaseClient: SupabaseClient, path: string): Promise<string> {
+  const { data, error } = await supabaseClient.storage.from('bills').download(path);
+  if (error || !data) {
+    throw new Error(`Failed to download image from storage: ${error?.message}`);
   }
-  const contentType = res.headers.get('content-type') || 'image/jpeg';
-  const buf = await res.arrayBuffer();
+
+  const contentType = data.type || 'image/jpeg';
+  const buf = await data.arrayBuffer();
   const bytes = new Uint8Array(buf);
 
   // Deno-native base64 encode
@@ -66,40 +84,42 @@ Deno.serve(async (req) => {
   let body;
   try {
     body = await req.json();
-  } catch (_err) {
+  } catch {
     return jsonResponse(400, { error: 'Invalid JSON body' });
   }
 
   const imageUrl = String(body?.image_url || '').trim();
   const storagePath = String(body?.storage_path || '').trim();
   if (!imageUrl && !storagePath) {
-    return jsonResponse(400, { error: 'image_url is required' });
+    return jsonResponse(400, { error: 'storage_path or image_url is required' });
   }
 
   try {
-    // Resolve a downloadable URL for the image
-    let downloadUrl: string;
+    let dataUrl: string;
 
     if (storagePath) {
-      const { data: signedData, error: signedError } = await auth.client.storage
-        .from('bills')
-        .createSignedUrl(storagePath, 300);
-      if (signedError || !signedData?.signedUrl) {
-        console.error('Failed to create signed URL for image', signedError);
-        return jsonResponse(422, { error: 'Could not access uploaded image' });
+      // Download image directly from storage and convert to base64 data URL
+      dataUrl = await getBase64DataUrlFromStorage(auth.client, storagePath);
+    } else if (imageUrl) {
+      // Fallback for older clients sending image_url
+      const res = await fetch(imageUrl);
+      if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
+      const contentType = res.headers.get('content-type') || 'image/jpeg';
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
       }
-      downloadUrl = signedData.signedUrl;
+      dataUrl = `data:${contentType};base64,${btoa(binary)}`;
     } else {
-      downloadUrl = imageUrl;
+      throw new Error('No valid image source provided.');
     }
-
-    // Download image and convert to base64 data URL so DashScope can read it
-    const dataUrl = await toBase64DataUrl(downloadUrl);
 
     const parsed = await generateVisionJson(BILL_PROMPT, dataUrl);
 
     const items = Array.isArray(parsed?.transactions) ? parsed.transactions : [];
-    const validItems = items.filter((item: any) => {
+    const validItems = items.filter((item: RawItem) => {
       const amount = Number(item?.amount);
       return Number.isFinite(amount) && amount > 0;
     });
@@ -110,6 +130,11 @@ Deno.serve(async (req) => {
 
     const rawInput = storagePath || imageUrl;
 
+    // Compute totals before creating session
+    const normalizedItems = validItems.map((item: RawItem) => normalizeTransaction(item));
+    const totalAmount = normalizedItems.reduce((sum, n) => sum + n.amount, 0);
+    const sessionCurrency = normalizedItems[0]?.currency || '¥';
+
     const { data: session, error: sessionError } = await auth.client
       .from('input_sessions')
       .insert({
@@ -117,6 +142,9 @@ Deno.serve(async (req) => {
         source: 'bill_scan',
         raw_input: rawInput,
         ai_raw_output: parsed,
+        record_count: normalizedItems.length,
+        total_amount: totalAmount,
+        currency: sessionCurrency,
       })
       .select('id')
       .single();
@@ -126,8 +154,7 @@ Deno.serve(async (req) => {
       return jsonResponse(500, { error: 'Failed to create session' });
     }
 
-    const rows = validItems.map((item: any) => {
-      const normalized = normalizeTransaction(item);
+    const rows = normalizedItems.map((normalized) => {
       return {
         user_id: auth.user.id,
         session_id: session.id,
@@ -150,7 +177,7 @@ Deno.serve(async (req) => {
       return jsonResponse(500, { error: 'Failed to create transactions' });
     }
 
-    await auth.client.from('input_sessions').update({ record_count: transactions.length }).eq('id', session.id);
+    // record_count already set at insert time, no separate update needed
 
     return jsonResponse(200, { session_id: session.id, transactions });
   } catch (err) {

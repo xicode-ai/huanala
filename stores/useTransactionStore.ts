@@ -1,33 +1,38 @@
 import { create } from 'zustand';
-import { Transaction } from '../types';
+import { InputSession } from '../types';
 import { authService } from '../services/authService';
+import { sessionService } from '../services/sessionService';
 import { transactionService } from '../services/transactionService';
 
 interface TransactionState {
-  transactions: Transaction[];
+  sessions: InputSession[];
   isLoading: boolean;
   isUploading: boolean;
+  isFetchingMore: boolean;
   lastBatchCount: number;
-  fetchTransactions: () => Promise<void>;
-  addTransaction: (tx: Transaction) => void;
-  addTransactions: (txs: Transaction[]) => void;
-  insertTransaction: (tx: Omit<Transaction, 'id'>) => Promise<Transaction | null>;
+  page: number;
+  hasMore: boolean;
+  monthlyExpenses: number;
+  totalIncome: number;
+  fetchSessions: () => Promise<void>;
+  fetchMoreSessions: () => Promise<void>;
   uploadBill: (file: File) => Promise<void>;
   uploadVoice: (transcriptText: string) => Promise<void>;
   clearLastBatchCount: () => void;
-  monthlyExpenses: number;
-  totalIncome: number;
 }
 
 export const useTransactionStore = create<TransactionState>((set, get) => ({
-  transactions: [],
+  sessions: [],
   isLoading: false,
   isUploading: false,
+  isFetchingMore: false,
   lastBatchCount: 0,
+  page: 0,
+  hasMore: true,
   monthlyExpenses: 0,
   totalIncome: 0,
 
-  fetchTransactions: async () => {
+  fetchSessions: async () => {
     set({ isLoading: true });
     try {
       const {
@@ -38,56 +43,51 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         return;
       }
 
-      const transactions = await transactionService.fetchAll(session.user.id);
+      const [pageResult, summary] = await Promise.all([
+        sessionService.fetchPage(session.user.id, 0),
+        sessionService.fetchMonthlySummary(session.user.id),
+      ]);
 
-      // Compute monthly summary
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const monthlyTransactions = transactions.filter(
-        (t) => new Date(t.date) >= monthStart || true // all fetched for now
-      );
-      const monthlyExpenses = monthlyTransactions
-        .filter((t) => t.type === 'expense')
-        .reduce((sum, t) => sum + t.amount, 0);
-      const totalIncome = monthlyTransactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-
-      set({ transactions, monthlyExpenses, totalIncome, isLoading: false });
+      set({
+        sessions: pageResult.sessions,
+        hasMore: pageResult.hasMore,
+        page: 0,
+        monthlyExpenses: summary.expenses,
+        totalIncome: summary.income,
+        isLoading: false,
+      });
     } catch (error) {
-      console.error('Failed to fetch transactions:', error);
+      console.error('Failed to fetch sessions:', error);
       set({ isLoading: false });
     }
   },
 
-  addTransaction: (tx: Transaction) => {
-    set((state) => ({
-      transactions: [tx, ...state.transactions],
-      monthlyExpenses: tx.type === 'expense' ? state.monthlyExpenses + tx.amount : state.monthlyExpenses,
-      totalIncome: tx.type === 'income' ? state.totalIncome + tx.amount : state.totalIncome,
-    }));
-  },
+  fetchMoreSessions: async () => {
+    const { isFetchingMore, hasMore, page } = get();
+    if (isFetchingMore || !hasMore) return;
 
-  addTransactions: (txs: Transaction[]) => {
-    set((state) => ({
-      transactions: [...txs, ...state.transactions],
-      monthlyExpenses:
-        state.monthlyExpenses + txs.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
-      totalIncome: state.totalIncome + txs.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
-    }));
-  },
-
-  insertTransaction: async (tx: Omit<Transaction, 'id'>) => {
+    set({ isFetchingMore: true });
     try {
       const {
         data: { session },
       } = await authService.getSession();
-      if (!session) return null;
+      if (!session) {
+        set({ isFetchingMore: false });
+        return;
+      }
 
-      const mapped = await transactionService.insert(session.user.id, tx);
-      get().addTransaction(mapped);
-      return mapped;
+      const nextPage = page + 1;
+      const result = await sessionService.fetchPage(session.user.id, nextPage);
+
+      set((state) => ({
+        sessions: [...state.sessions, ...result.sessions],
+        hasMore: result.hasMore,
+        page: nextPage,
+        isFetchingMore: false,
+      }));
     } catch (error) {
-      console.error('Failed to insert transaction:', error);
-      return null;
+      console.error('Failed to fetch more sessions:', error);
+      set({ isFetchingMore: false });
     }
   },
 
@@ -99,9 +99,18 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       } = await authService.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      const mapped = await transactionService.uploadBill(session.user.id, file);
-      get().addTransactions(mapped);
-      set({ lastBatchCount: mapped.length });
+      const result = await transactionService.uploadBill(session.user.id, file);
+
+      set((state) => ({
+        sessions: [result.session, ...state.sessions],
+        monthlyExpenses:
+          state.monthlyExpenses +
+          result.transactions.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+        totalIncome:
+          state.totalIncome +
+          result.transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
+        lastBatchCount: result.transactions.length,
+      }));
     } catch (error) {
       console.error('Upload bill failed:', error);
     } finally {
@@ -117,9 +126,18 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       } = await authService.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      const mapped = await transactionService.processVoice(transcriptText);
-      get().addTransactions(mapped);
-      set({ lastBatchCount: mapped.length });
+      const result = await transactionService.processVoice(transcriptText);
+
+      set((state) => ({
+        sessions: [result.session, ...state.sessions],
+        monthlyExpenses:
+          state.monthlyExpenses +
+          result.transactions.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+        totalIncome:
+          state.totalIncome +
+          result.transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
+        lastBatchCount: result.transactions.length,
+      }));
     } catch (error) {
       console.error('Voice processing failed:', error);
     } finally {

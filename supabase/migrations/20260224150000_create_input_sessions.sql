@@ -20,15 +20,18 @@ CREATE INDEX IF NOT EXISTS idx_input_sessions_created_at ON public.input_session
 -- Enable RLS
 ALTER TABLE public.input_sessions ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies
+-- RLS Policies (idempotent: drop if exists before create)
+DROP POLICY IF EXISTS "Users can view their own sessions" ON public.input_sessions;
 CREATE POLICY "Users can view their own sessions"
     ON public.input_sessions FOR SELECT
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert their own sessions" ON public.input_sessions;
 CREATE POLICY "Users can insert their own sessions"
     ON public.input_sessions FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete their own sessions" ON public.input_sessions;
 CREATE POLICY "Users can delete their own sessions"
     ON public.input_sessions FOR DELETE
     USING (auth.uid() = user_id);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/MobileLayout';
 import { Icon } from '../components/Icon';
@@ -6,19 +6,39 @@ import { Skeleton } from '../components/Skeleton';
 import { useUserStore, useTransactionStore } from '../stores';
 import { Sidebar } from './Sidebar';
 import { useSpeechToText } from '../hooks/useSpeechToText';
+import { InputSession } from '../types';
+
+const SOURCE_LABELS: Record<string, string> = {
+  voice: '语音记账',
+  bill_scan: '图片记账',
+  manual: '手动输入',
+};
+
+const SOURCE_ICONS: Record<string, string> = {
+  voice: 'graphic_eq',
+  bill_scan: 'image',
+  manual: 'edit',
+};
+
+// ── Component ───────────────────────────────────────────────────────
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
   const { user, fetchUser, isLoading: userLoading } = useUserStore();
   const {
-    transactions,
-    fetchTransactions,
+    sessions,
+    fetchSessions,
+    fetchMoreSessions,
     uploadBill,
     uploadVoice,
     isLoading: txLoading,
     isUploading,
+    isFetchingMore,
+    hasMore,
     lastBatchCount,
     clearLastBatchCount,
+    monthlyExpenses,
+    totalIncome,
   } = useTransactionStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -45,18 +65,21 @@ export const Home: React.FC = () => {
   const isTranscribing = speechStatus === 'transcribing';
   const displayVoiceError = voiceError ?? speechError?.message ?? null;
 
-  // Refs for hidden file inputs
+  // Refs
   const albumInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const prevTranscriptRef = useRef('');
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // ── Effects ─────────────────────────────────────────────────────
 
   useEffect(() => {
     fetchUser();
-    fetchTransactions();
+    fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 仅在组件挂载时执行一次，Zustand store 方法是稳定引用
+  }, []);
 
-  // Submit transcript when recording completes (Task 6.3)
+  // Submit transcript when recording completes
   useEffect(() => {
     if (speechStatus === 'idle' && transcript && transcript !== prevTranscriptRef.current) {
       prevTranscriptRef.current = transcript;
@@ -72,6 +95,30 @@ export const Home: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [lastBatchCount, isUploading, clearLastBatchCount]);
+
+  // ── Infinite scroll via IntersectionObserver ─────────────────────
+
+  const handleIntersect = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      const entry = entries[0];
+      if (entry?.isIntersecting && hasMore && !isFetchingMore && !isLoading) {
+        fetchMoreSessions();
+      }
+    },
+    [hasMore, isFetchingMore, isLoading, fetchMoreSessions]
+  );
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(handleIntersect, {
+      rootMargin: '200px',
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleIntersect]);
+
+  // ── Handlers ────────────────────────────────────────────────────
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -107,6 +154,56 @@ export const Home: React.FC = () => {
       console.error('[Home] stopRecording failed:', err);
     }
   };
+
+  // ── Render helpers ──────────────────────────────────────────────
+
+  const renderSessionCard = (s: InputSession, index: number) => (
+    <div
+      key={s.id}
+      className="animate-in slide-in-from-bottom-5 duration-500 fill-mode-forwards"
+      style={{ animationDelay: `${Math.min(index, 5) * 80}ms` }}
+    >
+      <div className="flex gap-4 pl-1">
+        <div className="flex flex-col items-center w-12 pt-1 shrink-0">
+          <span className="text-xs text-slate-400 font-medium">{s.time}</span>
+          <div className="w-px h-full bg-slate-200 my-2 rounded-full min-h-[40px]"></div>
+        </div>
+        <div className="flex-1 pb-4">
+          <button
+            onClick={() => navigate(`/session/${s.id}`)}
+            className="w-full text-left bg-gradient-to-br from-white to-blue-50/40 rounded-2xl p-4 shadow-card border border-blue-50 hover:shadow-md transition-shadow active:scale-[0.99]"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Icon name={SOURCE_ICONS[s.source] || 'layers'} className="text-primary text-[18px]" />
+                </div>
+                <div>
+                  <span className="text-sm font-bold text-slate-700">{SOURCE_LABELS[s.source] || s.source}</span>
+                  <span className="text-xs text-slate-400 ml-2">{s.recordCount} 条记录</span>
+                </div>
+              </div>
+              <div className="bg-white border border-blue-100 px-3 py-1 rounded-full shadow-sm">
+                <span className="text-primary font-bold text-sm">
+                  -{s.currency}
+                  {s.totalAmount.toFixed(2)}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>{s.date}</span>
+              <div className="flex items-center text-primary/70">
+                <span>查看详情</span>
+                <Icon name="chevron_right" className="text-[14px]" />
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Main render ─────────────────────────────────────────────────
 
   return (
     <MobileLayout className="bg-background-light text-text-main">
@@ -163,7 +260,9 @@ export const Home: React.FC = () => {
           <div className="flex justify-between items-start">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <p className="text-slate-400 text-sm font-medium tracking-wide">Feb Expenses</p>
+                <p className="text-slate-400 text-sm font-medium tracking-wide">
+                  {new Date().toLocaleDateString('en-US', { month: 'short' })} Expenses
+                </p>
                 <Icon name="visibility" className="text-slate-300 text-[18px] cursor-pointer" />
               </div>
               <div className="relative inline-block min-h-[4rem]">
@@ -171,7 +270,7 @@ export const Home: React.FC = () => {
                   <Skeleton className="h-14 w-48 mt-2" />
                 ) : (
                   <h2 className="text-slate-800 text-[2.75rem] font-bold tracking-tight leading-tight relative z-10 animate-in fade-in duration-500">
-                    ¥0.00
+                    ¥{monthlyExpenses.toFixed(2)}
                   </h2>
                 )}
               </div>
@@ -181,7 +280,7 @@ export const Home: React.FC = () => {
                   {isLoading ? (
                     <Skeleton className="h-5 w-16" />
                   ) : (
-                    <p className="text-slate-800 font-semibold animate-in fade-in">¥0.00</p>
+                    <p className="text-slate-800 font-semibold animate-in fade-in">¥{totalIncome.toFixed(2)}</p>
                   )}
                 </div>
                 <div>
@@ -241,8 +340,12 @@ export const Home: React.FC = () => {
         {/* Daily Prompt */}
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-3 px-2">
-            <h3 className="text-xl font-bold text-slate-800">Today, Feb 3</h3>
-            <span className="text-slate-400 text-sm">(Tue)</span>
+            <h3 className="text-xl font-bold text-slate-800">
+              Today, {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </h3>
+            <span className="text-slate-400 text-sm">
+              ({new Date().toLocaleDateString('en-US', { weekday: 'short' })})
+            </span>
             <Icon name="chevron_right" className="text-slate-300 text-lg" />
           </div>
           <div className="bg-gradient-to-br from-white to-blue-50/50 rounded-[2rem] p-6 flex justify-between items-center shadow-card border border-white">
@@ -260,7 +363,7 @@ export const Home: React.FC = () => {
           </div>
         </div>
 
-        {/* Transactions List */}
+        {/* Sessions List */}
         <div className="mt-10 mb-6">
           <div className="flex items-center gap-2 mb-6 px-2">
             <h3 className="text-lg font-bold text-slate-800">Recent</h3>
@@ -286,43 +389,19 @@ export const Home: React.FC = () => {
                 ))}
               </>
             ) : (
-              transactions.map((t, index) => (
-                <div
-                  key={t.id}
-                  className="relative flex gap-4 pl-1 animate-in slide-in-from-bottom-5 duration-500 fill-mode-forwards"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <div className="flex flex-col items-center w-12 pt-1 shrink-0">
-                    <span className="text-xs text-slate-400 font-medium">{t.time}</span>
-                    <div className="w-px h-full bg-slate-200 my-2 rounded-full min-h-[40px] last:bg-gradient-to-b last:from-slate-200 last:to-transparent"></div>
-                  </div>
-                  <div className="flex-1 pb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div
-                        className={`flex items-center gap-2 ${t.iconBg || 'bg-slate-50'} ${t.iconColor || 'text-slate-500'} pl-2 pr-3 py-1 rounded-full`}
-                      >
-                        <Icon name={t.icon} className="text-[20px]" />
-                        <span className="text-sm font-bold">{t.category}</span>
-                      </div>
-                      <div className="bg-white border border-blue-100 px-3 py-1 rounded-full shadow-sm">
-                        <span className="text-primary font-bold text-sm">
-                          {t.type === 'expense' ? '-' : '+'} {t.currency}
-                          {t.amount.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                    <p className="text-slate-700 font-bold text-[15px] pl-1 mb-1">{t.title}</p>
-                    {t.note && <p className="text-slate-400 text-xs pl-1">{t.note}</p>}
-                    {t.details?.description && (
-                      <div className="mt-2 bg-slate-100 rounded-2xl rounded-tl-sm p-3 flex gap-2.5 items-start text-sm leading-relaxed">
-                        <span className="font-bold text-primary text-xs whitespace-nowrap mt-0.5">AI:</span>
-                        <span className="text-slate-600">{t.details.description}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
+              sessions.map((s, index) => renderSessionCard(s, index))
             )}
+          </div>
+
+          {/* Infinite scroll sentinel */}
+          <div ref={sentinelRef} className="py-4 flex justify-center">
+            {isFetchingMore && (
+              <div className="flex items-center gap-2 text-slate-400 text-sm animate-in fade-in">
+                <div className="size-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
+                <span>加载更多...</span>
+              </div>
+            )}
+            {!hasMore && sessions.length > 0 && <p className="text-slate-300 text-xs">没有更多记录了</p>}
           </div>
         </div>
       </main>
@@ -332,7 +411,7 @@ export const Home: React.FC = () => {
         className={`absolute bottom-0 left-0 w-full z-30 transition-all duration-300 ${isMenuOpen || isRecording || isTranscribing ? 'bg-[#F8F9FE]/95 backdrop-blur-md shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]' : 'bg-gradient-to-t from-background-light via-background-light to-transparent'}`}
       >
         <div className="px-5 pb-6 pt-2">
-          {/* Voice Error Toast */}
+          {/* Batch Toast */}
           {batchToast && (
             <div className="mb-2 px-4 py-2.5 bg-green-50 border border-green-100 rounded-2xl text-green-700 text-sm font-medium animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-2">
               <Icon name="check_circle" className="text-[18px] shrink-0" />

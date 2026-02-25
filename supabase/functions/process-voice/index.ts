@@ -10,7 +10,23 @@ const VOICE_PROMPT = [
   'No markdown, no explanation, JSON only.',
 ].join(' ');
 
-function normalizeTransaction(item: any) {
+interface RawItem {
+  title?: string;
+  amount?: number | string;
+  currency?: string;
+  category?: string;
+  type?: string;
+}
+
+interface NormalizedItem {
+  title: string;
+  amount: number;
+  currency: string;
+  category: string;
+  type: string;
+}
+
+function normalizeTransaction(item: RawItem): NormalizedItem {
   const amount = Number(item?.amount);
   return {
     title: typeof item?.title === 'string' && item.title.trim() ? item.title.trim() : 'Voice Transaction',
@@ -42,7 +58,7 @@ Deno.serve(async (req) => {
   let body;
   try {
     body = await req.json();
-  } catch (_err) {
+  } catch {
     return jsonResponse(400, { error: 'Invalid JSON body' });
   }
 
@@ -63,6 +79,11 @@ Deno.serve(async (req) => {
       return jsonResponse(422, { error: 'Could not extract transaction data' });
     }
 
+    // Compute totals before creating session
+    const normalizedItems = items.map((item: RawItem) => normalizeTransaction(item));
+    const totalAmount = normalizedItems.reduce((sum, n) => sum + n.amount, 0);
+    const sessionCurrency = normalizedItems[0]?.currency || '¥';
+
     const { data: session, error: sessionError } = await auth.client
       .from('input_sessions')
       .insert({
@@ -70,6 +91,9 @@ Deno.serve(async (req) => {
         source: 'voice',
         raw_input: transcript,
         ai_raw_output: parsed,
+        record_count: normalizedItems.length,
+        total_amount: totalAmount,
+        currency: sessionCurrency,
       })
       .select('id')
       .single();
@@ -79,8 +103,7 @@ Deno.serve(async (req) => {
       return jsonResponse(500, { error: 'Failed to create session' });
     }
 
-    const rows = items.map((item: any) => {
-      const normalized = normalizeTransaction(item);
+    const rows = normalizedItems.map((normalized) => {
       return {
         user_id: auth.user.id,
         session_id: session.id,
@@ -102,7 +125,7 @@ Deno.serve(async (req) => {
       return jsonResponse(500, { error: 'Failed to create transactions' });
     }
 
-    await auth.client.from('input_sessions').update({ record_count: transactions.length }).eq('id', session.id);
+    // record_count already set at insert time, no separate update needed
 
     return jsonResponse(200, { session_id: session.id, transactions });
   } catch (err) {

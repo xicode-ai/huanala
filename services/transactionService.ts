@@ -1,5 +1,7 @@
-import { Transaction } from '../types';
+import { Transaction, InputSession } from '../types';
 import { supabase } from './supabase';
+
+const PAGE_SIZE = 20;
 
 /**
  * 将 Supabase 行数据映射为 Transaction 类型
@@ -18,6 +20,7 @@ function mapRow(row: Record<string, unknown>): Transaction {
     iconColor: (row.icon_color as string) || 'text-slate-500',
     type: row.type as 'expense' | 'income',
     note: row.note as string | undefined,
+    sessionId: (row.session_id as string) || undefined,
     details: {
       merchant: row.merchant as string | undefined,
       description: row.description as string | undefined,
@@ -25,19 +28,73 @@ function mapRow(row: Record<string, unknown>): Transaction {
   };
 }
 
+import { compressImage } from '../utils/imageCompress';
+
 /**
  * 交易服务 - 交易记录 CRUD 和相关操作
  */
 export const transactionService = {
   /**
-   * 获取用户所有交易记录
+   * 分页获取用户交易记录
    */
-  fetchAll: async (userId: string): Promise<Transaction[]> => {
+  fetchPage: async (
+    userId: string,
+    page: number = 0,
+    pageSize: number = PAGE_SIZE
+  ): Promise<{ transactions: Transaction[]; hasMore: boolean }> => {
+    const from = page * pageSize;
+    const to = from + pageSize; // 多取 1 条判断是否还有更多
+
     const { data, error } = await supabase
       .from('transactions')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+    return {
+      transactions: pageRows.map(mapRow),
+      hasMore,
+    };
+  },
+
+  /**
+   * 获取当月收支汇总
+   */
+  fetchMonthlySummary: async (userId: string): Promise<{ expenses: number; income: number }> => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('amount, type')
+      .eq('user_id', userId)
+      .gte('created_at', monthStart);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const expenses = rows.filter((r) => r.type === 'expense').reduce((sum, r) => sum + Number(r.amount), 0);
+    const income = rows.filter((r) => r.type === 'income').reduce((sum, r) => sum + Number(r.amount), 0);
+
+    return { expenses, income };
+  },
+
+  /**
+   * 根据 session_id 获取会话下所有交易
+   */
+  fetchBySessionId: async (sessionId: string): Promise<Transaction[]> => {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true });
 
     if (error) throw error;
     return (data || []).map(mapRow);
@@ -71,32 +128,53 @@ export const transactionService = {
   },
 
   /**
-   * 上传账单图片并处理
+   * 上传账单图片并处理 — returns new InputSession + transactions
    */
-  uploadBill: async (userId: string, file: File): Promise<Transaction[]> => {
-    const ext = file.name.split('.').pop() || 'jpg';
+  uploadBill: async (userId: string, file: File): Promise<{ session: InputSession; transactions: Transaction[] }> => {
+    // Compress the image before uploading
+    let fileToUpload = file;
+    try {
+      if (file.type.startsWith('image/')) {
+        fileToUpload = await compressImage(file, 0.75); // 0.75 quality is between 0.65-0.8 requirement
+      }
+    } catch (compressError) {
+      console.error('Failed to compress image, uploading original', compressError);
+    }
+
+    const ext = fileToUpload.name.split('.').pop() || 'jpg';
     const path = `${userId}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage.from('bills').upload(path, file);
+    const { error: uploadError } = await supabase.storage.from('bills').upload(path, fileToUpload);
     if (uploadError) throw uploadError;
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-      .from('bills')
-      .createSignedUrl(path, 60 * 5);
-    if (signedUrlError) throw signedUrlError;
+
+    // We no longer need the signed URL, we will pass the path instead
     const { data, error } = await supabase.functions.invoke('process-bill', {
-      body: { image_url: signedUrlData?.signedUrl, storage_path: path },
+      body: { storage_path: path },
     });
 
     if (error || !Array.isArray(data?.transactions) || data.transactions.length === 0) {
       throw error || new Error('No transactions returned from process-bill');
     }
 
-    return data.transactions.map(mapRow);
+    const txs = (data.transactions as Record<string, unknown>[]).map(mapRow);
+    const now = new Date().toISOString();
+    const session: InputSession = {
+      id: data.session_id as string,
+      source: 'bill_scan',
+      recordCount: txs.length,
+      totalAmount: txs.reduce((sum, t) => sum + t.amount, 0),
+      currency: txs[0]?.currency || '¥',
+      date: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      time: new Date(now).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: now,
+    };
+
+    return { session, transactions: txs };
   },
 
   /**
-   * 处理语音记账
+   * 处理语音记账 — returns new InputSession + transactions
    */
-  processVoice: async (transcript: string): Promise<Transaction[]> => {
+  processVoice: async (transcript: string): Promise<{ session: InputSession; transactions: Transaction[] }> => {
     const { data, error } = await supabase.functions.invoke('process-voice', {
       body: { transcript },
     });
@@ -105,6 +183,19 @@ export const transactionService = {
       throw error || new Error('No transactions returned from process-voice');
     }
 
-    return data.transactions.map(mapRow);
+    const txs = (data.transactions as Record<string, unknown>[]).map(mapRow);
+    const now = new Date().toISOString();
+    const session: InputSession = {
+      id: data.session_id as string,
+      source: 'voice',
+      recordCount: txs.length,
+      totalAmount: txs.reduce((sum, t) => sum + t.amount, 0),
+      currency: txs[0]?.currency || '¥',
+      date: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      time: new Date(now).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: now,
+    };
+
+    return { session, transactions: txs };
   },
 };

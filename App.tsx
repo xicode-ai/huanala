@@ -8,6 +8,7 @@ import { Home } from './pages/Home';
 import { Chat } from './pages/Chat';
 import { ProfileSettings } from './pages/ProfileSettings';
 import { SystemSettings } from './pages/SystemSettings';
+import { SessionDetail } from './pages/SessionDetail';
 import { useUserStore } from './stores';
 import { setAuthProvider } from './services/auth/types';
 import { SupabaseAuthProvider } from './services/auth/supabaseAuthProvider';
@@ -96,6 +97,14 @@ const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 <SystemSettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:id"
+            element={
+              <ProtectedRoute>
+                <SessionDetail />
               </ProtectedRoute>
             }
           />
