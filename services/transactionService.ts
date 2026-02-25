@@ -1,5 +1,6 @@
 import { Transaction, InputSession } from '../types';
 import { supabase } from './supabase';
+import { compressImage } from './imageCompression';
 
 const PAGE_SIZE = 20;
 
@@ -27,8 +28,6 @@ function mapRow(row: Record<string, unknown>): Transaction {
     },
   };
 }
-
-import { compressImage } from '../utils/imageCompress';
 
 /**
  * 交易服务 - 交易记录 CRUD 和相关操作
@@ -131,22 +130,15 @@ export const transactionService = {
    * 上传账单图片并处理 — returns new InputSession + transactions
    */
   uploadBill: async (userId: string, file: File): Promise<{ session: InputSession; transactions: Transaction[] }> => {
-    // Compress the image before uploading
-    let fileToUpload = file;
-    try {
-      if (file.type.startsWith('image/')) {
-        fileToUpload = await compressImage(file, 0.75); // 0.75 quality is between 0.65-0.8 requirement
-      }
-    } catch (compressError) {
-      console.error('Failed to compress image, uploading original', compressError);
-    }
-
-    const ext = fileToUpload.name.split('.').pop() || 'jpg';
-    const path = `${userId}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage.from('bills').upload(path, fileToUpload);
+    // Compress image client-side before upload (JPEG quality 0.7, ~83% size reduction)
+    const compressed = await compressImage(file);
+    const path = `${userId}/${Date.now()}.jpg`;
+    const { error: uploadError } = await supabase.storage.from('bills').upload(path, compressed, {
+      contentType: 'image/jpeg',
+    });
     if (uploadError) throw uploadError;
 
-    // We no longer need the signed URL, we will pass the path instead
+    // Edge function reads directly from storage — no signed URL needed
     const { data, error } = await supabase.functions.invoke('process-bill', {
       body: { storage_path: path },
     });

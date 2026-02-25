@@ -41,7 +41,7 @@ function normalizeTransaction(item: RawItem): NormalizedItem {
 /**
  * Download a file from Supabase Storage and return a base64 data URL.
  * DashScope (China) cannot download external URLs reliably or quickly,
- * so we must fetch the image bytes on the edge function and inline them.
+ * so we fetch the image bytes on the edge function and inline them.
  */
 async function getBase64DataUrlFromStorage(supabaseClient: SupabaseClient, path: string): Promise<string> {
   const { data, error } = await supabaseClient.storage.from('bills').download(path);
@@ -88,34 +88,14 @@ Deno.serve(async (req) => {
     return jsonResponse(400, { error: 'Invalid JSON body' });
   }
 
-  const imageUrl = String(body?.image_url || '').trim();
   const storagePath = String(body?.storage_path || '').trim();
-  if (!imageUrl && !storagePath) {
-    return jsonResponse(400, { error: 'storage_path or image_url is required' });
+  if (!storagePath) {
+    return jsonResponse(400, { error: 'storage_path is required' });
   }
 
   try {
-    let dataUrl: string;
-
-    if (storagePath) {
-      // Download image directly from storage and convert to base64 data URL
-      dataUrl = await getBase64DataUrlFromStorage(auth.client, storagePath);
-    } else if (imageUrl) {
-      // Fallback for older clients sending image_url
-      const res = await fetch(imageUrl);
-      if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
-      const contentType = res.headers.get('content-type') || 'image/jpeg';
-      const buf = await res.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      dataUrl = `data:${contentType};base64,${btoa(binary)}`;
-    } else {
-      throw new Error('No valid image source provided.');
-    }
-
+    // Download image directly from storage and convert to base64 data URL
+    const dataUrl = await getBase64DataUrlFromStorage(auth.client, storagePath);
     const parsed = await generateVisionJson(BILL_PROMPT, dataUrl);
 
     const items = Array.isArray(parsed?.transactions) ? parsed.transactions : [];
@@ -128,7 +108,7 @@ Deno.serve(async (req) => {
       return jsonResponse(422, { error: 'Could not extract transaction data from image' });
     }
 
-    const rawInput = storagePath || imageUrl;
+    const rawInput = storagePath;
 
     // Compute totals before creating session
     const normalizedItems = validItems.map((item: RawItem) => normalizeTransaction(item));
