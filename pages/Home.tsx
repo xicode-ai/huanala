@@ -178,16 +178,10 @@ export const Home: React.FC = () => {
                 <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Icon name={SOURCE_ICONS[s.source] || 'layers'} className="text-primary text-[18px]" />
                 </div>
-                <div>
-                  <span className="text-sm font-bold text-slate-700">{SOURCE_LABELS[s.source] || s.source}</span>
-                  <span className="text-xs text-slate-400 ml-2">{s.recordCount} 条记录</span>
-                </div>
+                <span className="text-sm font-bold text-slate-700">{SOURCE_LABELS[s.source] || s.source}</span>
               </div>
-              <div className="bg-white border border-blue-100 px-3 py-1 rounded-full shadow-sm">
-                <span className="text-primary font-bold text-sm">
-                  -{s.currency}
-                  {s.totalAmount.toFixed(2)}
-                </span>
+              <div className="bg-slate-50 border border-slate-100 px-2.5 py-1 rounded-full">
+                <span className="text-slate-500 font-medium text-xs">{s.recordCount} 条记录</span>
               </div>
             </div>
             <div className="flex items-center justify-between text-xs text-slate-400">
@@ -336,7 +330,6 @@ export const Home: React.FC = () => {
             )}
           </div>
         </div>
-
         {/* Daily Prompt */}
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-3 px-2">

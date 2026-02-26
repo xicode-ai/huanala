@@ -21,7 +21,7 @@ export async function generateText(messages) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'qwen-plus',
+      model: 'qwen3.5-flash',
       messages,
     }),
   });
@@ -54,7 +54,7 @@ export async function generateVisionJson(prompt, imageUrl) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'qwen-vl-plus',
+      model: 'qwen3.5-plus',
       messages: [
         {
           role: 'user',
