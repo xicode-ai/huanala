@@ -331,7 +331,14 @@ export const Chat: React.FC = () => {
           <input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend(inputValue)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                if (inputValue.trim()) {
+                  handleSend(inputValue);
+                }
+              }
+            }}
             className="flex-1 bg-transparent border-none p-0 text-slate-800 placeholder-slate-400 focus:ring-0 text-[15px] font-medium h-12 outline-none"
             placeholder={isVoiceRecording ? '正在录音...' : 'Ask Hua Na Le...'}
             type="text"

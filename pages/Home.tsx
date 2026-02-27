@@ -465,6 +465,16 @@ export const Home: React.FC = () => {
                       type="text"
                       placeholder="Tap here to record"
                       className="w-full bg-transparent border-none outline-none text-[15px] font-medium placeholder-slate-400 text-slate-800 h-full py-2"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          const val = e.currentTarget.value.trim();
+                          if (val) {
+                            e.preventDefault();
+                            uploadVoice(val);
+                            e.currentTarget.value = '';
+                          }
+                        }
+                      }}
                     />
                   )}
                 </div>
