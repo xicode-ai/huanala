@@ -1,4 +1,5 @@
 const QWEN_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const MODEL = 'qwen3.5-plus';
 
 /** SSE line delimiter */
 const LF = '\n';
@@ -24,7 +25,7 @@ export async function generateText(messages) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'qwen-plus',
+      model: MODEL,
       messages,
     }),
   });
@@ -57,7 +58,7 @@ export async function generateVisionJson(prompt, imageUrl) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'qwen-vl-plus',
+      model: MODEL,
       messages: [
         {
           role: 'user',
@@ -104,7 +105,7 @@ export async function generateVisionJsonStream(prompt, imageUrl, onChunk) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'qwen-plus',
+      model: MODEL,
       stream: true,
       messages: [
         {

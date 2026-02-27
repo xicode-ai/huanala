@@ -103,6 +103,36 @@ export const transactionService = {
   },
 
   /**
+   * 根据 session_id 分页获取会话下交易记录
+   */
+  fetchBySessionIdPage: async (
+    sessionId: string,
+    page: number = 0,
+    pageSize: number = PAGE_SIZE
+  ): Promise<{ transactions: Transaction[]; hasMore: boolean }> => {
+    const from = page * pageSize;
+    const to = from + pageSize; // 多取 1 条判断是否还有更多
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+    return {
+      transactions: pageRows.map(mapRow),
+      hasMore,
+    };
+  },
+
+  /**
    * 插入新交易记录
    */
   insert: async (userId: string, tx: Omit<Transaction, 'id'>): Promise<Transaction> => {

@@ -1,35 +1,77 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/MobileLayout';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
+import { ScrollSentinel } from '../components/ScrollSentinel';
 import { Transaction } from '../types';
 import { transactionService } from '../services/transactionService';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
 export const SessionDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [result, setResult] = useState<{
-    fetchedId: string;
-    transactions: Transaction[];
-  } | null>(null);
 
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const pageRef = useRef(0);
+  const fetchedIdRef = useRef<string | null>(null);
+
+  // Initial fetch — reset state when session id changes
   useEffect(() => {
     if (!id) return;
     let active = true;
+
+    // Reset pagination state for new session
+    setTransactions([]);
+    setIsLoading(true);
+    setHasMore(true);
+    pageRef.current = 0;
+    fetchedIdRef.current = id;
+
     transactionService
-      .fetchBySessionId(id)
-      .then((txs) => {
-        if (active) setResult({ fetchedId: id, transactions: txs });
+      .fetchBySessionIdPage(id, 0)
+      .then((result) => {
+        if (active) {
+          setTransactions(result.transactions);
+          setHasMore(result.hasMore);
+          pageRef.current = 1;
+        }
       })
-      .catch((err) => console.error('Failed to fetch session transactions:', err));
+      .catch((err) => console.error('Failed to fetch session transactions:', err))
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
     return () => {
       active = false;
     };
   }, [id]);
 
-  const isLoading = !result || result.fetchedId !== id;
-  const transactions = result?.transactions ?? [];
+  // Load more handler for infinite scroll
+  const loadMore = useCallback(async () => {
+    if (!id || isFetchingMore) return;
+    setIsFetchingMore(true);
+    try {
+      const result = await transactionService.fetchBySessionIdPage(id, pageRef.current);
+      setTransactions((prev) => [...prev, ...result.transactions]);
+      setHasMore(result.hasMore);
+      pageRef.current += 1;
+    } catch (err) {
+      console.error('Failed to fetch more transactions:', err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  }, [id, isFetchingMore]);
+
+  // Infinite scroll hook
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    isLoading: isFetchingMore || isLoading,
+    loadMore,
+  });
 
   return (
     <MobileLayout className="bg-background-light text-text-main">
@@ -123,6 +165,16 @@ export const SessionDetail: React.FC = () => {
                 </div>
               ))}
         </div>
+
+        {/* Infinite scroll sentinel */}
+        {!isLoading && (
+          <ScrollSentinel
+            sentinelRef={sentinelRef}
+            isFetchingMore={isFetchingMore}
+            hasMore={hasMore}
+            hasData={transactions.length > 0}
+          />
+        )}
       </main>
     </MobileLayout>
   );
