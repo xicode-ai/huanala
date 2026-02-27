@@ -74,6 +74,7 @@ No barrel export. Import from specific files.
 | `engines/CapacitorSpeechEngine.ts` | Native Capacitor plugin implementation          |
 
 **Key patterns:**
+
 - Strategy pattern: `SpeechEngine` interface → platform-specific implementations
 - `SpeechToTextService`: singleton class via `getInstance()` (only class besides `SupabaseAuthProvider`)
 - Platform detection: `window.Capacitor.isNativePlatform()` → selects Capacitor or Web engine

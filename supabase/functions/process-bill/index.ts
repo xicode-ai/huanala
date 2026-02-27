@@ -1,7 +1,10 @@
 import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
-import { ensureConfigured, generateVisionJson } from '../_shared/qwen.js';
+import { ensureConfigured, generateVisionJsonStream, parseJsonFromText } from '../_shared/qwen.js';
+
+/** SSE double-newline delimiter */
+const SSE_DELIM = '\n\n';
 
 const BILL_PROMPT = [
   'Extract ALL line items from this receipt/purchase order image. Return JSON only.',
@@ -38,12 +41,20 @@ function normalizeTransaction(item: RawItem): NormalizedItem {
   };
 }
 
+/** Structured performance log helper */
+function perfLog(step: string, durationMs: number, meta: Record<string, unknown>) {
+  console.log(JSON.stringify({ event: 'perf', step, durationMs: Math.round(durationMs), meta }));
+}
+
 /**
  * Download a file from Supabase Storage and return a base64 data URL.
  * DashScope (China) cannot download external URLs reliably or quickly,
  * so we fetch the image bytes on the edge function and inline them.
  */
-async function getBase64DataUrlFromStorage(supabaseClient: SupabaseClient, path: string): Promise<string> {
+async function getBase64DataUrlFromStorage(
+  supabaseClient: SupabaseClient,
+  path: string
+): Promise<{ dataUrl: string; imageSizeBytes: number }> {
   const { data, error } = await supabaseClient.storage.from('bills').download(path);
   if (error || !data) {
     throw new Error(`Failed to download image from storage: ${error?.message}`);
@@ -60,7 +71,57 @@ async function getBase64DataUrlFromStorage(supabaseClient: SupabaseClient, path:
   }
   const b64 = btoa(binary);
 
-  return `data:${contentType};base64,${b64}`;
+  return { dataUrl: `data:${contentType};base64,${b64}`, imageSizeBytes: bytes.length };
+}
+
+/**
+ * Try to extract complete JSON objects from a partial JSON string being streamed.
+ * Looks for complete {...} blocks inside the transactions array.
+ * Returns an array of newly found complete objects and the count processed so far.
+ */
+function extractCompleteObjects(text: string, alreadyProcessed: number): RawItem[] {
+  const newItems: RawItem[] = [];
+
+  // Try to find the transactions array content
+  const arrStart = text.indexOf('[');
+  if (arrStart < 0) return newItems;
+
+  const content = text.slice(arrStart + 1);
+
+  // Find all complete {...} objects by tracking brace depth
+  let depth = 0;
+  let objStart = -1;
+  let objCount = 0;
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        objCount++;
+        if (objCount > alreadyProcessed) {
+          // Check if this object is truly complete (followed by , or ] or whitespace+, or whitespace+])
+          const rest = content.slice(i + 1).trimStart();
+          if (rest.length === 0) {
+            // Object might still be the last one being streamed — skip for safety
+            break;
+          }
+          try {
+            const obj = JSON.parse(content.slice(objStart, i + 1));
+            newItems.push(obj);
+          } catch {
+            // Malformed — skip
+          }
+        }
+        objStart = -1;
+      }
+    }
+  }
+
+  return newItems;
 }
 
 Deno.serve(async (req) => {
@@ -93,75 +154,245 @@ Deno.serve(async (req) => {
     return jsonResponse(400, { error: 'storage_path is required' });
   }
 
-  try {
-    // Download image directly from storage and convert to base64 data URL
-    const dataUrl = await getBase64DataUrlFromStorage(auth.client, storagePath);
-    const parsed = await generateVisionJson(BILL_PROMPT, dataUrl);
+  // Set up SSE streaming response
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
 
-    const items = Array.isArray(parsed?.transactions) ? parsed.transactions : [];
-    const validItems = items.filter((item: RawItem) => {
-      const amount = Number(item?.amount);
-      return Number.isFinite(amount) && amount > 0;
-    });
+  const sendSSE = (data: Record<string, unknown>) => {
+    return writer.write(encoder.encode('data: ' + JSON.stringify(data) + SSE_DELIM));
+  };
 
-    if (validItems.length === 0) {
-      return jsonResponse(422, { error: 'Could not extract transaction data from image' });
-    }
+  /** SSE comment to keep connection alive (not parsed as event by clients) */
+  const sendKeepAlive = () => {
+    return writer.write(encoder.encode(': keepalive' + SSE_DELIM));
+  };
 
-    const rawInput = storagePath;
+  // Run the processing pipeline in background
+  (async () => {
+    const totalStart = Date.now();
+    let transactionCount = 0;
+    let success = false;
+    let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
 
-    // Compute totals before creating session
-    const normalizedItems = validItems.map((item: RawItem) => normalizeTransaction(item));
-    const totalAmount = normalizedItems.reduce((sum, n) => sum + n.amount, 0);
-    const sessionCurrency = normalizedItems[0]?.currency || '¥';
+    try {
+      // --- Step 1: Download image ---
+      const dlStart = Date.now();
+      const { dataUrl, imageSizeBytes } = await getBase64DataUrlFromStorage(auth.client, storagePath);
+      perfLog('image_download', Date.now() - dlStart, { storagePath, imageSizeBytes });
 
-    const { data: session, error: sessionError } = await auth.client
-      .from('input_sessions')
-      .insert({
-        user_id: auth.user.id,
-        source: 'bill_scan',
-        raw_input: rawInput,
-        ai_raw_output: parsed,
-        record_count: normalizedItems.length,
-        total_amount: totalAmount,
-        currency: sessionCurrency,
-      })
-      .select('id')
-      .single();
+      // --- Step 2: Create session (before streaming) ---
+      const dbSessionStart = Date.now();
+      const { data: session, error: sessionError } = await auth.client
+        .from('input_sessions')
+        .insert({
+          user_id: auth.user.id,
+          source: 'bill_scan',
+          raw_input: storagePath,
+          record_count: 0,
+          total_amount: 0,
+          currency: '¥',
+        })
+        .select('id')
+        .single();
 
-    if (sessionError) {
-      console.error('Failed to create input session', sessionError);
-      return jsonResponse(500, { error: 'Failed to create session' });
-    }
+      if (sessionError || !session) {
+        console.error('Failed to create input session', sessionError);
+        await sendSSE({ type: 'error', message: 'Failed to create session' });
+        return;
+      }
+      perfLog('db_session_create', Date.now() - dbSessionStart, { sessionCreated: true });
 
-    const rows = normalizedItems.map((normalized) => {
-      return {
-        user_id: auth.user.id,
+      // Send initial event immediately to prevent gateway idle timeout
+      await sendSSE({ type: 'session_created', session_id: session.id });
+
+      // Start keepalive interval (every 15s) to prevent gateway idle timeout during AI processing
+      keepAliveInterval = setInterval(() => {
+        sendKeepAlive().catch(() => {
+          /* writer closed */
+        });
+      }, 15_000);
+
+      // --- Step 3: AI streaming request ---
+      const aiStart = Date.now();
+      let processedCount = 0;
+      let accumulatedText = '';
+      let totalAmount = 0;
+      const insertedTransactions: Record<string, unknown>[] = [];
+      const dbInsertStart = Date.now();
+
+      const fullText = await generateVisionJsonStream(BILL_PROMPT, dataUrl, async (delta: string) => {
+        accumulatedText += delta;
+
+        // Try incremental extraction
+        const newItems = extractCompleteObjects(accumulatedText, processedCount);
+
+        for (const rawItem of newItems) {
+          const amount = Number(rawItem?.amount);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            processedCount++;
+            continue;
+          }
+
+          const normalized = normalizeTransaction(rawItem);
+          const row = {
+            user_id: auth.user.id,
+            session_id: session.id,
+            title: normalized.title,
+            amount: normalized.amount,
+            currency: normalized.currency,
+            category: normalized.category,
+            type: 'expense',
+            source: 'bill_scan',
+            merchant: normalized.merchant,
+            note: 'Scanned Receipt',
+            description: 'Auto-extracted from uploaded bill image',
+          };
+
+          try {
+            const { data: tx, error: insertError } = await auth.client
+              .from('transactions')
+              .insert(row)
+              .select('*')
+              .single();
+
+            if (insertError) {
+              console.error('Failed to insert transaction', insertError);
+            } else if (tx) {
+              insertedTransactions.push(tx);
+              totalAmount += normalized.amount;
+              transactionCount++;
+              await sendSSE({
+                type: 'transaction_inserted',
+                data: tx,
+                progress: { completed: transactionCount },
+              });
+            }
+          } catch (insertErr) {
+            console.error('Transaction insert exception', insertErr);
+          }
+
+          processedCount++;
+        }
+      });
+
+      perfLog('ai_request', Date.now() - aiStart, {
+        model: 'qwen3.5-plus',
+        streamMode: true,
+        totalTokens: null,
+      });
+
+      // --- Step 4: Final reconciliation ---
+      // Parse the complete response and insert any objects missed during streaming
+      try {
+        const parsed = parseJsonFromText(fullText);
+        const allItems = Array.isArray(parsed?.transactions) ? parsed.transactions : [];
+
+        for (let i = processedCount; i < allItems.length; i++) {
+          const rawItem = allItems[i] as RawItem;
+          const amount = Number(rawItem?.amount);
+          if (!Number.isFinite(amount) || amount <= 0) continue;
+
+          const normalized = normalizeTransaction(rawItem);
+          const row = {
+            user_id: auth.user.id,
+            session_id: session.id,
+            title: normalized.title,
+            amount: normalized.amount,
+            currency: normalized.currency,
+            category: normalized.category,
+            type: 'expense',
+            source: 'bill_scan',
+            merchant: normalized.merchant,
+            note: 'Scanned Receipt',
+            description: 'Auto-extracted from uploaded bill image',
+          };
+
+          try {
+            const { data: tx, error: insertError } = await auth.client
+              .from('transactions')
+              .insert(row)
+              .select('*')
+              .single();
+
+            if (insertError) {
+              console.error('Failed to insert remaining transaction', insertError);
+            } else if (tx) {
+              insertedTransactions.push(tx);
+              totalAmount += normalized.amount;
+              transactionCount++;
+              await sendSSE({
+                type: 'transaction_inserted',
+                data: tx,
+                progress: { completed: transactionCount },
+              });
+            }
+          } catch (insertErr) {
+            console.error('Remaining transaction insert exception', insertErr);
+          }
+        }
+
+        // Store AI raw output in session
+        await auth.client.from('input_sessions').update({ ai_raw_output: parsed }).eq('id', session.id);
+      } catch (parseErr) {
+        console.error('Final JSON parse failed', parseErr);
+      }
+
+      // --- Step 5: Update session with final totals ---
+      const sessionCurrency =
+        insertedTransactions.length > 0
+          ? ((insertedTransactions[0] as Record<string, unknown>).currency as string) || '¥'
+          : '¥';
+
+      await auth.client
+        .from('input_sessions')
+        .update({
+          record_count: transactionCount,
+          total_amount: totalAmount,
+          currency: sessionCurrency,
+        })
+        .eq('id', session.id);
+
+      perfLog('db_operations', Date.now() - dbInsertStart, {
+        sessionCreated: true,
+        transactionsInserted: transactionCount,
+      });
+
+      success = true;
+
+      // Send completion event
+      await sendSSE({
+        type: 'completed',
         session_id: session.id,
-        title: normalized.title,
-        amount: normalized.amount,
-        currency: normalized.currency,
-        category: normalized.category,
-        type: 'expense',
-        source: 'bill_scan',
-        merchant: normalized.merchant,
-        note: 'Scanned Receipt',
-        description: 'Auto-extracted from uploaded bill image',
-      };
-    });
-
-    const { data: transactions, error: insertError } = await auth.client.from('transactions').insert(rows).select('*');
-
-    if (insertError) {
-      console.error('Failed to insert bill transactions', insertError);
-      return jsonResponse(500, { error: 'Failed to create transactions' });
+        total_count: transactionCount,
+        total_amount: totalAmount,
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('Bill processing failed', errMsg, err);
+      try {
+        await sendSSE({ type: 'error', message: errMsg || 'AI service unavailable' });
+      } catch {
+        // Writer may already be closed
+      }
+    } finally {
+      if (keepAliveInterval) clearInterval(keepAliveInterval);
+      perfLog('total', Date.now() - totalStart, { success, transactionCount });
+      try {
+        await writer.close();
+      } catch {
+        // Already closed
+      }
     }
+  })();
 
-    // record_count already set at insert time, no separate update needed
-
-    return jsonResponse(200, { session_id: session.id, transactions });
-  } catch (err) {
-    console.error('Bill processing failed', err);
-    return jsonResponse(502, { error: 'AI service unavailable' });
-  }
+  // Return streaming response immediately
+  return new Response(readable, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 });

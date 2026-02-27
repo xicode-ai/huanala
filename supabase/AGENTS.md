@@ -56,6 +56,7 @@ Deno.serve(async (req) => {
 | `qwen.js` | `ensureConfigured()`, `generateText(messages)`, `generateVisionJson(prompt, imageUrl)`, `parseJsonFromText(text)` |
 
 `getAuthenticatedUser()` returns `{ user, client }` or `null`. Qwen uses DashScope API (`DASHSCOPE_API_KEY`), models: `qwen-plus` (text), `qwen-vl-plus` (vision).
+
 ## Database
 
 4 tables, all with RLS (user-scoped policies):

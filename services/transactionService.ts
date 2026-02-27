@@ -4,6 +4,9 @@ import { compressImage } from './imageCompression';
 
 const PAGE_SIZE = 20;
 
+/** SSE line delimiter */
+const LF = '\n';
+
 /**
  * 将 Supabase 行数据映射为 Transaction 类型
  */
@@ -127,40 +130,97 @@ export const transactionService = {
   },
 
   /**
-   * 上传账单图片并处理 — returns new InputSession + transactions
+   * 上传账单图片并处理 — SSE streaming, returns new InputSession + transactions
    */
-  uploadBill: async (userId: string, file: File): Promise<{ session: InputSession; transactions: Transaction[] }> => {
-    // Compress image client-side before upload (JPEG quality 0.7, ~83% size reduction)
+  uploadBill: async (
+    userId: string,
+    file: File,
+    onProgress?: (info: { completed: number; latest: Transaction }) => void
+  ): Promise<{ session: InputSession; transactions: Transaction[] }> => {
+    // Compress image client-side (WebP preferred, JPEG fallback)
     const compressed = await compressImage(file);
-    const path = `${userId}/${Date.now()}.jpg`;
+    const ext = compressed.type === 'image/webp' ? '.webp' : '.jpg';
+    const path = `${userId}/${Date.now()}${ext}`;
     const { error: uploadError } = await supabase.storage.from('bills').upload(path, compressed, {
-      contentType: 'image/jpeg',
+      contentType: compressed.type,
     });
     if (uploadError) throw uploadError;
 
-    // Edge function reads directly from storage — no signed URL needed
-    const { data, error } = await supabase.functions.invoke('process-bill', {
-      body: { storage_path: path },
+    // Get auth token for direct fetch (bypass supabase.functions.invoke for SSE streaming)
+    const {
+      data: { session: authSession },
+    } = await supabase.auth.getSession();
+    if (!authSession?.access_token) throw new Error('Not authenticated');
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const response = await fetch(`${supabaseUrl}/functions/v1/process-bill`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authSession.access_token}`,
+      },
+      body: JSON.stringify({ storage_path: path }),
     });
 
-    if (error || !Array.isArray(data?.transactions) || data.transactions.length === 0) {
-      throw error || new Error('No transactions returned from process-bill');
+    if (!response.ok || !response.body) {
+      throw new Error(`process-bill failed: ${response.status}`);
     }
 
-    const txs = (data.transactions as Record<string, unknown>[]).map(mapRow);
+    // Read SSE stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const transactions: Transaction[] = [];
+    let sessionId = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const sseLines = buffer.split(LF);
+      buffer = sseLines.pop() || '';
+
+      for (const line of sseLines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const event = JSON.parse(jsonStr);
+          if (event.type === 'transaction_inserted' && event.data) {
+            const tx = mapRow(event.data);
+            transactions.push(tx);
+            onProgress?.({ completed: event.progress?.completed || transactions.length, latest: tx });
+          } else if (event.type === 'completed') {
+            sessionId = event.session_id || '';
+          } else if (event.type === 'error') {
+            throw new Error(event.message || 'Bill processing failed');
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+
+    if (transactions.length === 0) {
+      throw new Error('No transactions returned from process-bill');
+    }
+
     const now = new Date().toISOString();
     const session: InputSession = {
-      id: data.session_id as string,
+      id: sessionId,
       source: 'bill_scan',
-      recordCount: txs.length,
-      totalAmount: txs.reduce((sum, t) => sum + t.amount, 0),
-      currency: txs[0]?.currency || '¥',
+      recordCount: transactions.length,
+      totalAmount: transactions.reduce((sum, t) => sum + t.amount, 0),
+      currency: transactions[0]?.currency || '¥',
       date: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       time: new Date(now).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
       createdAt: now,
     };
 
-    return { session, transactions: txs };
+    return { session, transactions };
   },
 
   /**

@@ -10,6 +10,7 @@ interface TransactionState {
   isUploading: boolean;
   isFetchingMore: boolean;
   lastBatchCount: number;
+  uploadProgress: number;
   page: number;
   hasMore: boolean;
   monthlyExpenses: number;
@@ -27,6 +28,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   isUploading: false,
   isFetchingMore: false,
   lastBatchCount: 0,
+  uploadProgress: 0,
   page: 0,
   hasMore: true,
   monthlyExpenses: 0,
@@ -92,14 +94,16 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   },
 
   uploadBill: async (file: File) => {
-    set({ isUploading: true });
+    set({ isUploading: true, uploadProgress: 0 });
     try {
       const {
         data: { session },
       } = await authService.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      const result = await transactionService.uploadBill(session.user.id, file);
+      const result = await transactionService.uploadBill(session.user.id, file, (info) => {
+        set({ uploadProgress: info.completed });
+      });
 
       set((state) => ({
         sessions: [result.session, ...state.sessions],
@@ -114,7 +118,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     } catch (error) {
       console.error('Upload bill failed:', error);
     } finally {
-      set({ isUploading: false });
+      set({ isUploading: false, uploadProgress: 0 });
     }
   },
 

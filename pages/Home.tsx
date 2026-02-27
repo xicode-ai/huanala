@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileLayout } from '../components/MobileLayout';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
+import { ScrollSentinel } from '../components/ScrollSentinel';
 import { useUserStore, useTransactionStore } from '../stores';
 import { Sidebar } from './Sidebar';
 import { useSpeechToText } from '../hooks/useSpeechToText';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 import { InputSession } from '../types';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -33,6 +35,7 @@ export const Home: React.FC = () => {
     uploadVoice,
     isLoading: txLoading,
     isUploading,
+    uploadProgress,
     isFetchingMore,
     hasMore,
     lastBatchCount,
@@ -69,7 +72,6 @@ export const Home: React.FC = () => {
   const albumInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const prevTranscriptRef = useRef('');
-  const sentinelRef = useRef<HTMLDivElement>(null);
 
   // ── Effects ─────────────────────────────────────────────────────
 
@@ -96,27 +98,13 @@ export const Home: React.FC = () => {
     }
   }, [lastBatchCount, isUploading, clearLastBatchCount]);
 
-  // ── Infinite scroll via IntersectionObserver ─────────────────────
+  // ── Infinite scroll ─────────────────────────────────────────────
 
-  const handleIntersect = useCallback(
-    (entries: IntersectionObserverEntry[]) => {
-      const entry = entries[0];
-      if (entry?.isIntersecting && hasMore && !isFetchingMore && !isLoading) {
-        fetchMoreSessions();
-      }
-    },
-    [hasMore, isFetchingMore, isLoading, fetchMoreSessions]
-  );
-
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(handleIntersect, {
-      rootMargin: '200px',
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [handleIntersect]);
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    isLoading: isFetchingMore || isLoading,
+    loadMore: fetchMoreSessions,
+  });
 
   // ── Handlers ────────────────────────────────────────────────────
 
@@ -387,15 +375,12 @@ export const Home: React.FC = () => {
           </div>
 
           {/* Infinite scroll sentinel */}
-          <div ref={sentinelRef} className="py-4 flex justify-center">
-            {isFetchingMore && (
-              <div className="flex items-center gap-2 text-slate-400 text-sm animate-in fade-in">
-                <div className="size-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
-                <span>加载更多...</span>
-              </div>
-            )}
-            {!hasMore && sessions.length > 0 && <p className="text-slate-300 text-xs">没有更多记录了</p>}
-          </div>
+          <ScrollSentinel
+            sentinelRef={sentinelRef}
+            isFetchingMore={isFetchingMore}
+            hasMore={hasMore}
+            hasData={sessions.length > 0}
+          />
         </div>
       </main>
 
@@ -473,7 +458,7 @@ export const Home: React.FC = () => {
                   {isUploading ? (
                     <div className="flex items-center gap-2 text-primary font-medium text-[15px]">
                       <div className="size-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                      <span>Analyzing...</span>
+                      <span>{uploadProgress > 0 ? `已识别 ${uploadProgress} 条记录...` : 'Analyzing...'}</span>
                     </div>
                   ) : (
                     <input
