@@ -15,6 +15,8 @@
 | 20260207141152 | create_messages_table     | 创建聊天消息表                      |
 | 20260207141202 | create_profile_trigger    | 创建自动触发器                      |
 | 20260224150000 | create_input_sessions     | 创建输入会话表，交易表加 session_id |
+| 20260225120000 | session_first_pivot       | 会话表加 total_amount/currency 字段 |
+| 20260227160000 | add_text_source_type      | source 约束增加 'text' 类型         |
 
 ---
 
@@ -41,25 +43,25 @@
 
 存储用户的收支记录。
 
-| 字段          | 类型        | 默认值              | 描述                                                             |
-| ------------- | ----------- | ------------------- | ---------------------------------------------------------------- |
-| `id`          | UUID (主键) | `gen_random_uuid()` | 自动生成                                                         |
-| `user_id`     | UUID (外键) | -                   | 关联 `auth.users(id)`                                            |
-| `title`       | TEXT        | -                   | 交易标题                                                         |
-| `amount`      | NUMERIC     | -                   | 金额                                                             |
-| `currency`    | TEXT        | `'¥'`               | 货币符号                                                         |
-| `category`    | TEXT        | -                   | 分类名称                                                         |
-| `icon`        | TEXT        | `'receipt'`         | Material 图标名                                                  |
-| `icon_bg`     | TEXT        | `'bg-slate-50'`     | Tailwind 背景色                                                  |
-| `icon_color`  | TEXT        | `'text-slate-500'`  | Tailwind 文字色                                                  |
-| `type`        | TEXT        | -                   | 类型：`expense`（支出）或 `income`（收入）                       |
-| `note`        | TEXT        | -                   | 备注                                                             |
-| `merchant`    | TEXT        | -                   | 商户名称                                                         |
-| `description` | TEXT        | -                   | 详细描述                                                         |
-| `source`      | TEXT        | `'manual'`          | 来源：`manual`（手动）/ `voice`（语音）/ `bill_scan`（账单扫描） |
-| `created_at`  | TIMESTAMPTZ | `now()`             | 创建时间                                                         |
-| `updated_at`  | TIMESTAMPTZ | `now()`             | 更新时间                                                         |
-| `session_id`  | UUID (外键) | -                   | 关联 `input_sessions(id)`，可空，ON DELETE SET NULL              |
+| 字段          | 类型        | 默认值              | 描述                                                                             |
+| ------------- | ----------- | ------------------- | -------------------------------------------------------------------------------- |
+| `id`          | UUID (主键) | `gen_random_uuid()` | 自动生成                                                                         |
+| `user_id`     | UUID (外键) | -                   | 关联 `auth.users(id)`                                                            |
+| `title`       | TEXT        | -                   | 交易标题                                                                         |
+| `amount`      | NUMERIC     | -                   | 金额                                                                             |
+| `currency`    | TEXT        | `'¥'`               | 货币符号                                                                         |
+| `category`    | TEXT        | -                   | 分类名称                                                                         |
+| `icon`        | TEXT        | `'receipt'`         | Material 图标名                                                                  |
+| `icon_bg`     | TEXT        | `'bg-slate-50'`     | Tailwind 背景色                                                                  |
+| `icon_color`  | TEXT        | `'text-slate-500'`  | Tailwind 文字色                                                                  |
+| `type`        | TEXT        | -                   | 类型：`expense`（支出）或 `income`（收入）                                       |
+| `note`        | TEXT        | -                   | 备注                                                                             |
+| `merchant`    | TEXT        | -                   | 商户名称                                                                         |
+| `description` | TEXT        | -                   | 详细描述                                                                         |
+| `source`      | TEXT        | `'manual'`          | 来源：`manual`（手动）/ `voice`（语音）/ `bill_scan`（账单扫描）/ `text`（文字） |
+| `created_at`  | TIMESTAMPTZ | `now()`             | 创建时间                                                                         |
+| `updated_at`  | TIMESTAMPTZ | `now()`             | 更新时间                                                                         |
+| `session_id`  | UUID (外键) | -                   | 关联 `input_sessions(id)`，可空，ON DELETE SET NULL                              |
 
 ---
 
@@ -67,15 +69,15 @@
 
 记录一次用户输入（语音/图片/手动）产生的多条交易记录的会话信息。
 
-| 字段            | 类型        | 默认值              | 描述                                                             |
-| --------------- | ----------- | ------------------- | ---------------------------------------------------------------- |
-| `id`            | UUID (主键) | `gen_random_uuid()` | 自动生成                                                         |
-| `user_id`       | UUID (外键) | -                   | 关联 `auth.users(id)`                                            |
-| `source`        | TEXT        | -                   | 来源：`voice`（语音）/ `bill_scan`（账单扫描）/ `manual`（手动） |
-| `raw_input`     | TEXT        | -                   | 原始输入（语音转文字结果 / 图片 storage_path）                   |
-| `ai_raw_output` | JSONB       | -                   | AI 返回的原始 JSON（调试用）                                     |
-| `record_count`  | INTEGER     | `0`                 | 本次会话创建的交易记录数                                         |
-| `created_at`    | TIMESTAMPTZ | `now()`             | 创建时间                                                         |
+| 字段            | 类型        | 默认值              | 描述                                                                             |
+| --------------- | ----------- | ------------------- | -------------------------------------------------------------------------------- |
+| `id`            | UUID (主键) | `gen_random_uuid()` | 自动生成                                                                         |
+| `user_id`       | UUID (外键) | -                   | 关联 `auth.users(id)`                                                            |
+| `source`        | TEXT        | -                   | 来源：`voice`（语音）/ `bill_scan`（账单扫描）/ `manual`（手动）/ `text`（文字） |
+| `raw_input`     | TEXT        | -                   | 原始输入（语音转文字结果 / 图片 storage_path）                                   |
+| `ai_raw_output` | JSONB       | -                   | AI 返回的原始 JSON（调试用）                                                     |
+| `record_count`  | INTEGER     | `0`                 | 本次会话创建的交易记录数                                                         |
+| `created_at`    | TIMESTAMPTZ | `now()`             | 创建时间                                                                         |
 
 ---
 
