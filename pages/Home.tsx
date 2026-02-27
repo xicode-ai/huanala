@@ -13,6 +13,7 @@ import { InputSession } from '../types';
 const SOURCE_LABELS: Record<string, string> = {
   voice: '语音记账',
   bill_scan: '图片记账',
+  text: '文字记账',
   manual: '手动输入',
 };
 
@@ -20,6 +21,7 @@ const SOURCE_ICONS: Record<string, string> = {
   voice: 'graphic_eq',
   bill_scan: 'image',
   manual: 'edit',
+  text: 'edit_note',
 };
 
 // ── Component ───────────────────────────────────────────────────────
@@ -33,6 +35,7 @@ export const Home: React.FC = () => {
     fetchMoreSessions,
     uploadBill,
     uploadVoice,
+    uploadText,
     isLoading: txLoading,
     isUploading,
     uploadProgress,
@@ -470,7 +473,7 @@ export const Home: React.FC = () => {
                           const val = e.currentTarget.value.trim();
                           if (val) {
                             e.preventDefault();
-                            uploadVoice(val);
+                            uploadText(val);
                             e.currentTarget.value = '';
                           }
                         }

@@ -35,7 +35,7 @@ export interface Transaction {
 
 export interface InputSession {
   id: string;
-  source: 'voice' | 'bill_scan' | 'manual';
+  source: 'voice' | 'bill_scan' | 'manual' | 'text';
   recordCount: number;
   totalAmount: number;
   currency: string;

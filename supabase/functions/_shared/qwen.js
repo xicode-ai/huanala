@@ -12,7 +12,7 @@ export function ensureConfigured() {
   return Boolean(getApiKey());
 }
 
-export async function generateText(messages) {
+export async function generateText(messages, model) {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('AI_NOT_CONFIGURED');
@@ -25,7 +25,7 @@ export async function generateText(messages) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: model || MODEL,
       messages,
     }),
   });

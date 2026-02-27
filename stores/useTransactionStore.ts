@@ -19,6 +19,7 @@ interface TransactionState {
   fetchMoreSessions: () => Promise<void>;
   uploadBill: (file: File) => Promise<void>;
   uploadVoice: (transcriptText: string) => Promise<void>;
+  uploadText: (text: string) => Promise<void>;
   clearLastBatchCount: () => void;
 }
 
@@ -144,6 +145,33 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       }));
     } catch (error) {
       console.error('Voice processing failed:', error);
+    } finally {
+      set({ isUploading: false });
+    }
+  },
+
+  uploadText: async (text: string) => {
+    set({ isUploading: true });
+    try {
+      const {
+        data: { session },
+      } = await authService.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const result = await transactionService.processText(text);
+
+      set((state) => ({
+        sessions: [result.session, ...state.sessions],
+        monthlyExpenses:
+          state.monthlyExpenses +
+          result.transactions.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+        totalIncome:
+          state.totalIncome +
+          result.transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
+        lastBatchCount: result.transactions.length,
+      }));
+    } catch (error) {
+      console.error('Text processing failed:', error);
     } finally {
       set({ isUploading: false });
     }

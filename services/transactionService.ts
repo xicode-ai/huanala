@@ -280,4 +280,33 @@ export const transactionService = {
 
     return { session, transactions: txs };
   },
+
+  /**
+   * 处理文字记账 — returns new InputSession + transactions
+   * 使用 qwen3.5-flash 模型，服务端异步入库以提升响应速度
+   */
+  processText: async (text: string): Promise<{ session: InputSession; transactions: Transaction[] }> => {
+    const { data, error } = await supabase.functions.invoke('process-text', {
+      body: { text },
+    });
+
+    if (error || !Array.isArray(data?.transactions) || data.transactions.length === 0) {
+      throw error || new Error('No transactions returned from process-text');
+    }
+
+    const txs = (data.transactions as Record<string, unknown>[]).map(mapRow);
+    const now = new Date().toISOString();
+    const session: InputSession = {
+      id: data.session_id as string,
+      source: 'text',
+      recordCount: txs.length,
+      totalAmount: txs.reduce((sum, t) => sum + t.amount, 0),
+      currency: txs[0]?.currency || '¥',
+      date: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      time: new Date(now).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: now,
+    };
+
+    return { session, transactions: txs };
+  },
 };
