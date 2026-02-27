@@ -9,7 +9,7 @@ const OTP_REGEX = /^\d{6}$/;
 
 export const LoginOneClick: React.FC = () => {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, resetOtpFlow, isLoading, isAuthenticated, authError, clearError } = useUserStore();
+  const { sendOtp, verifyOtp, isLoading, isAuthenticated, authError, clearError } = useUserStore();
 
   const [email, setEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');

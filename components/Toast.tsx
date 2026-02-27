@@ -31,7 +31,6 @@ const ToastItem: React.FC<{ toast: ToastType }> = ({ toast }) => {
   const getStyles = () => {
     const base =
       'flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg backdrop-blur-md transition-all duration-300 transform translate-y-0 opacity-100 max-w-[90vw]';
-    const initial = 'translate-y-4 opacity-0';
 
     // Using Tailwind colors from config
     switch (toast.type) {
