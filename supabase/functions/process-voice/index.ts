@@ -1,6 +1,7 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.js';
 import { getAuthenticatedUser } from '../_shared/auth.js';
 import { ensureConfigured, generateText, parseJsonFromText } from '../_shared/qwen.js';
+import { createSessionWithTransactions } from '../_shared/db.js';
 
 const VOICE_PROMPT = [
   'Extract ALL transactions from the transcript. Return JSON only.',
@@ -79,55 +80,17 @@ Deno.serve(async (req) => {
       return jsonResponse(422, { error: 'Could not extract transaction data' });
     }
 
-    // Compute totals before creating session
     const normalizedItems = items.map((item: RawItem) => normalizeTransaction(item));
-    const totalAmount = normalizedItems.reduce((sum, n) => sum + n.amount, 0);
-    const sessionCurrency = normalizedItems[0]?.currency || '¥';
 
-    const { data: session, error: sessionError } = await auth.client
-      .from('input_sessions')
-      .insert({
-        user_id: auth.user.id,
-        source: 'voice',
-        raw_input: transcript,
-        ai_raw_output: parsed,
-        record_count: normalizedItems.length,
-        total_amount: totalAmount,
-        currency: sessionCurrency,
-      })
-      .select('id')
-      .single();
-
-    if (sessionError) {
-      console.error('Failed to create input session', sessionError);
-      return jsonResponse(500, { error: 'Failed to create session' });
-    }
-
-    const rows = normalizedItems.map((normalized) => {
-      return {
-        user_id: auth.user.id,
-        session_id: session.id,
-        title: normalized.title,
-        amount: normalized.amount,
-        currency: normalized.currency,
-        category: normalized.category,
-        type: normalized.type,
-        source: 'voice',
-        note: 'Voice input',
-        description: transcript,
-      };
+    const result = await createSessionWithTransactions(auth.client, {
+      userId: auth.user.id,
+      source: 'voice',
+      rawInput: transcript,
+      aiRawOutput: parsed,
+      normalizedItems,
     });
 
-    const { data: transactions, error: insertError } = await auth.client.from('transactions').insert(rows).select('*');
-
-    if (insertError) {
-      console.error('Failed to insert voice transactions', insertError);
-      return jsonResponse(500, { error: 'Failed to create transactions' });
-    }
-
-    // record_count already set at insert time, no separate update needed
-
-    return jsonResponse(200, { session_id: session.id, transactions });
+    return jsonResponse(200, result);
   } catch (err) {
     console.error('Voice processing failed', err);
     return jsonResponse(502, { error: 'AI service unavailable' });

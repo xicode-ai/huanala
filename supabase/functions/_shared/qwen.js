@@ -27,6 +27,7 @@ export async function generateText(messages, model) {
     body: JSON.stringify({
       model: model || MODEL,
       messages,
+      enable_thinking: false,
     }),
   });
 
@@ -45,6 +46,11 @@ export async function generateText(messages, model) {
   return text;
 }
 
+export async function generateJsonFromText(messages, model) {
+  const text = await generateText(messages, model);
+  return parseJsonFromText(text);
+}
+
 export async function generateVisionJson(prompt, imageUrl) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -59,6 +65,7 @@ export async function generateVisionJson(prompt, imageUrl) {
     },
     body: JSON.stringify({
       model: MODEL,
+      enable_thinking: false,
       messages: [
         {
           role: 'user',
@@ -107,6 +114,7 @@ export async function generateVisionJsonStream(prompt, imageUrl, onChunk) {
     body: JSON.stringify({
       model: MODEL,
       stream: true,
+      enable_thinking: false,
       messages: [
         {
           role: 'user',

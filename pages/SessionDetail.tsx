@@ -146,21 +146,21 @@ export const SessionDetail: React.FC = () => {
                     <p className="text-slate-700 font-semibold text-[15px] leading-snug">{t.title}</p>
                     {t.note && <p className="text-slate-500 text-[13px] mt-1 line-clamp-2">{t.note}</p>}
 
-                    {t.details?.merchant && (
+                    {/* {t.details?.merchant && (
                       <div className="flex items-center gap-1 mt-1.5">
                         <Icon name="storefront" className="text-[14px] text-slate-400" />
                         <span className="text-slate-500 text-xs">{t.details.merchant}</span>
                       </div>
-                    )}
+                    )} */}
 
-                    {t.details?.description && (
+                    {/* {t.details?.description && (
                       <div className="mt-3 bg-slate-50 rounded-2xl rounded-tl-none p-3 flex gap-2.5 items-start">
                         <div className="mt-0.5 shrink-0">
                           <Icon name="auto_awesome" className="text-[14px] text-primary/70" />
                         </div>
                         <p className="text-slate-600 text-[13px] leading-relaxed flex-1">{t.details.description}</p>
                       </div>
-                    )}
+                    )} */}
                   </div>
                 </div>
               ))}
